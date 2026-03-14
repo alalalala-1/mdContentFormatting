@@ -1,0 +1,540 @@
+/* Canvas Mindmap Build Plugin - Collapse Button Styles */
+
+
+
+
+.cmb-collapse-button {
+    /* 基础定位和尺寸 - 正方形按钮 */
+    position: absolute !important;
+    z-index: 9999 !important;
+    cursor: pointer !important;
+    border: none !important;
+    outline: none !important;
+    background-color: var(--cmb-collapse-button-color, #e74c3c) !important;
+    /* 正方形，宽度固定 */
+    width: var(--cmb-collapse-btn-width, 20px) !important;
+    min-width: var(--cmb-collapse-btn-width, 20px) !important;
+    max-width: var(--cmb-collapse-btn-width, 20px) !important;
+    height: var(--cmb-collapse-btn-height, 20px) !important;
+    min-height: var(--cmb-collapse-btn-height, 20px) !important;
+    max-height: var(--cmb-collapse-btn-height, 20px) !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+
+    /* 显示和可见性 */
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+
+    /* 内容和对齐 */
+    pointer-events: auto !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 12px !important;
+    color: white !important;
+    font-weight: bold !important;
+    text-align: center !important;
+
+    /* 视觉效果 */
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3) !important;
+    touch-action: manipulation !important;
+    -webkit-tap-highlight-color: transparent !important;
+    transition: transform 0.1s ease, opacity 0.1s ease !important;
+
+    /* 防止被父元素裁剪 */
+    overflow: visible !important;
+}
+
+.cmb-collapse-button:hover {
+    background-color: var(--cmb-collapse-button-color, #e74c3c) !important;
+    filter: brightness(1.1) !important;
+    transform: scale(1.05) !important;
+}
+
+.cmb-collapse-button:active {
+    background-color: var(--cmb-collapse-button-color, #e74c3c) !important;
+    filter: brightness(0.9) !important;
+    transform: scale(0.95) !important;
+}
+
+.cmb-collapse-button.collapsed {
+    background-color: var(--cmb-collapse-button-color, #e74c3c) !important;
+}
+
+.cmb-collapse-button.collapsed:hover {
+    background-color: var(--cmb-collapse-button-color, #e74c3c) !important;
+    filter: brightness(1.1) !important;
+}
+
+.cmb-collapse-button.collapsed:active {
+    background-color: var(--cmb-collapse-button-color, #e74c3c) !important;
+    filter: brightness(0.9) !important;
+}
+
+.cmb-collapse-button.expanded {
+    background-color: var(--cmb-collapse-button-color, #e74c3c) !important;
+}
+
+.cmb-collapse-button.expanded:hover {
+    background-color: var(--cmb-collapse-button-color, #e74c3c) !important;
+    filter: brightness(1.1) !important;
+}
+
+.cmb-collapse-button.expanded:active {
+    background-color: var(--cmb-collapse-button-color, #e74c3c) !important;
+    filter: brightness(0.9) !important;
+}
+
+/* 确保按钮在各种容器中都能显示 - 右侧定位，左侧与节点重叠 */
+.canvas-node .cmb-collapse-button {
+    position: absolute !important;
+    /* 按钮左侧与节点右侧重叠 */
+    right: var(--cmb-collapse-btn-right, -20px) !important;
+    top: 0 !important;
+    left: auto !important;
+    transform: none !important;
+}
+
+/* 平板设备优化 (13.3寸，支持笔和手指触摸) */
+@media (min-width: 1024px) and (pointer: coarse) {
+    .cmb-collapse-button {
+        width: var(--cmb-collapse-btn-width, 24px) !important;
+        min-width: var(--cmb-collapse-btn-width, 24px) !important;
+        max-width: var(--cmb-collapse-btn-width, 24px) !important;
+        height: var(--cmb-collapse-btn-height, 24px) !important;
+        min-height: var(--cmb-collapse-btn-height, 24px) !important;
+        max-height: var(--cmb-collapse-btn-height, 24px) !important;
+        border-radius: 0 !important;
+        /* 保持按钮紧贴节点边框 */
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+
+    .canvas-node .cmb-collapse-button {
+        /* 精确定位，按钮左侧与节点右侧重叠 */
+        right: var(--cmb-collapse-btn-right, -24px) !important;
+        top: 0 !important;
+        left: auto !important;
+        transform: none !important;
+    }
+
+    /* 优化触摸反馈 */
+    .cmb-collapse-button:active {
+        transform: scale(0.95) !important;
+        filter: brightness(0.85) !important;
+    }
+}
+
+/* 支持触控的设备通用优化 */
+@media (pointer: coarse) {
+    .cmb-collapse-button {
+        /* 禁用 hover 效果（触摸设备上不需要） */
+        pointer-events: auto !important;
+        touch-action: manipulation !important;
+        -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1) !important;
+        /* 防止触摸时的文字选择 */
+        user-select: none !important;
+        -webkit-user-select: none !important;
+    }
+
+    /* 增大触摸目标 */
+    .cmb-collapse-button::before {
+        content: '' !important;
+        position: absolute !important;
+        top: -8px !important;
+        bottom: -8px !important;
+        left: 0 !important;
+        right: -8px !important;
+        z-index: -1 !important;
+    }
+    
+    /* 触摸时的视觉反馈 */
+    .cmb-collapse-button:active {
+        transform: scale(0.92) !important;
+        filter: brightness(0.85) !important;
+        transition: transform 0.05s ease !important;
+    }
+}
+
+/* 支持笔输入的设备 */
+@media (any-pointer: fine) {
+    .cmb-collapse-button {
+        /* 笔输入优化 */
+        cursor: pointer !important;
+    }
+}
+
+/* 暗黑模式支持 */
+@media (prefers-color-scheme: dark) {
+    .cmb-collapse-button {
+        box-shadow: 0 2px 4px rgba(0,0,0,0.4) !important;
+    }
+}
+
+/* 触屏/平板设备长按选中时的视觉效果 */
+.canvas-node.is-selected {
+    box-shadow: 0 0 0 2px var(--color-accent) !important;
+}
+
+/* 触控/手写笔：选中态优先保证可拖拽，不抢手势 */
+.canvas-node.cmb-touch-drag-armed:not(.is-editing) {
+    touch-action: none !important;
+    user-select: none !important;
+    -webkit-user-select: none !important;
+}
+
+/* 仅在短暂 drag-armed 窗口内退让 container/content/blocker。
+   selected/focused 不再长期劫持 pointer-events，避免破坏 Obsidian 原生
+   node-insert-event / placeholder / node-create 命中链。 */
+.canvas-node.cmb-touch-drag-armed:not(.is-editing) .canvas-node-container {
+    pointer-events: none !important;
+    touch-action: none !important;
+}
+
+/* 触控/手写笔按下节点后的短暂拖拽准备态：让内部内容层停止抢滚动/手势 */
+.canvas-node.cmb-touch-drag-armed:not(.is-editing),
+.canvas-node.cmb-touch-drag-armed:not(.is-editing) .canvas-node-content,
+.canvas-node.cmb-touch-drag-armed:not(.is-editing) .canvas-node-content .markdown-preview-view,
+.canvas-node.cmb-touch-drag-armed:not(.is-editing) .canvas-node-content .markdown-preview-sizer {
+    touch-action: none !important;
+    overscroll-behavior: none !important;
+    -webkit-overflow-scrolling: auto !important;
+    user-select: none !important;
+    -webkit-user-select: none !important;
+}
+
+/* drag-armed 时，让整个内容层（含根层自身，例如 markdown-embed）退让，
+   优先命中 blocker / 外层节点，避免拖拽准备窗口内仍打到内部文本层 */
+.canvas-node.cmb-touch-drag-armed:not(.is-editing) .canvas-node-content {
+    pointer-events: none !important;
+    touch-action: none !important;
+}
+
+.canvas-node.cmb-touch-drag-armed:not(.is-editing) .canvas-node-content > :not(.canvas-node-content-blocker) {
+    pointer-events: none !important;
+}
+
+.canvas-node.cmb-touch-drag-armed:not(.is-editing) .canvas-node-content-blocker {
+    pointer-events: auto !important;
+    touch-action: none !important;
+}
+
+/* selected/focused 恢复 Obsidian 原生命中链，避免长期 blocker 劫持导致无法新增节点 */
+.canvas-node.is-selected:not(.is-editing):not(.cmb-touch-drag-armed) .canvas-node-container,
+.canvas-node.is-focused:not(.is-editing):not(.cmb-touch-drag-armed) .canvas-node-container,
+.canvas-node.is-selected:not(.is-editing):not(.cmb-touch-drag-armed) .canvas-node-content,
+.canvas-node.is-focused:not(.is-editing):not(.cmb-touch-drag-armed) .canvas-node-content,
+.canvas-node.is-selected:not(.is-editing):not(.cmb-touch-drag-armed) .canvas-node-content-blocker,
+.canvas-node.is-focused:not(.is-editing):not(.cmb-touch-drag-armed) .canvas-node-content-blocker {
+    pointer-events: auto !important;
+    touch-action: auto !important;
+}
+
+/* 编辑态恢复文本交互 */
+.canvas-node.is-editing,
+.canvas-node.is-editing .canvas-node-content {
+    touch-action: auto !important;
+    user-select: text !important;
+    -webkit-user-select: text !important;
+}
+
+/* ============================================================================
+   Canvas节点定位修复（永久生效，防止inset污染导致的错连）
+   目标：强制Canvas节点只使用transform定位，禁止inset的top/left分量影响位置
+   原理：Canvas引擎主要使用transform定位，inset的非零top值是样式污染导致的异常
+   修复：强制inset:auto和top/left:0，让Canvas完全依赖transform定位链路
+   ============================================================================ */
+
+.canvas-node {
+    position: absolute !important;
+    inset: auto !important;
+    /* 关键顺序：inset 为 shorthand，会覆盖 top/left，故 top/left 放后写入 */
+    top: 0 !important;
+    left: 0 !important;
+    right: auto !important;
+    bottom: auto !important;
+    /* 节点边框样式 - 深蓝色2px + 15px倒角 */
+    border: 2px solid #1e3a8a !important;
+    border-radius: 15px !important;
+    /* 不使用overflow:hidden，否则会裁剪外部定位的折叠按钮 */
+    overflow: visible !important;
+}
+
+/* 节点内容区域倒角 - 与外框协调，并裁剪内部白底 */
+.canvas-node .canvas-node-content {
+    border-radius: 13px !important;
+    overflow: hidden !important;
+}
+
+/* 节点容器层倒角 - 确保多层结构都有倒角 */
+.canvas-node > div {
+    border-radius: 13px !important;
+    overflow: hidden !important;
+}
+
+/* ============================================================================
+   Canvas连线样式
+   - 可见线(display path) 保持深蓝色细线
+   - 交互线(interaction path) 必须保留更宽命中区，避免 touch/pen 难以选中
+   ============================================================================ */
+
+.canvas-edge .canvas-display-path,
+svg.canvas-edges .canvas-display-path,
+.canvas-edge line,
+svg.canvas-edges line {
+    stroke: #1e3a8a !important;
+    stroke-width: 2px !important;
+}
+
+.canvas-edge .canvas-interaction-path,
+svg.canvas-edges .canvas-interaction-path {
+    stroke: transparent !important;
+    fill: none !important;
+    pointer-events: stroke !important;
+    stroke-width: 22px !important;
+    vector-effect: non-scaling-stroke !important;
+    stroke-linecap: round !important;
+    stroke-linejoin: round !important;
+}
+
+@media (pointer: coarse) {
+    .canvas-edge .canvas-interaction-path,
+    svg.canvas-edges .canvas-interaction-path {
+        stroke-width: 28px !important;
+    }
+}
+
+/* ============================================================================
+   浮动节点样式
+   ============================================================================ */
+
+.cmb-floating-node {
+    border: 4px solid #ff4444 !important;
+    border-radius: 8px !important;
+    box-shadow: 0 0 15px rgba(255, 68, 68, 0.4) !important;
+    transition: border 0.3s ease, box-shadow 0.3s ease !important;
+}
+
+/* 浮动节点在选中时的样式 - 保持颜色一致，仅增强阴影 */
+.cmb-floating-node.is-focused,
+.cmb-floating-node.is-selected {
+    border-color: #ff4444 !important;
+    box-shadow: 0 0 20px rgba(255, 68, 68, 0.7) !important;
+}
+
+.cmb-floating-node .canvas-node-content {
+    border-radius: 6px !important;
+}
+
+/* ==========================================================================
+   fromLink 修复失败（未匹配）节点样式
+   ========================================================================== */
+
+.canvas-node.cmb-fromlink-unmatched {
+    border: 4px dashed #d8b4fe !important;
+    border-radius: 8px !important;
+}
+
+/* ============================================================================
+   文本节点内容区域滚动样式
+   当节点高度达到最大值时，内容可滚动
+   ============================================================================ */
+
+/* 文本节点内容区域 - 默认不启用滚动条（避免所有节点都出现滚动条） */
+.canvas-node .canvas-node-content {
+    overflow-y: hidden !important;
+    scrollbar-width: thin !important;
+    scrollbar-color: rgba(0, 0, 0, 0.3) transparent !important;
+    /* 优化触摸滚动性能 */
+    -webkit-overflow-scrolling: touch !important;
+    overscroll-behavior: contain !important;
+    /* 内容区域倒角已在上面统一定义 */
+}
+
+/* 兜底：内层 markdown 容器默认也禁止纵向滚动，避免主题/内联样式抢占滚动条 owner */
+.canvas-node .canvas-node-content .markdown-preview-view,
+.canvas-node .canvas-node-content .markdown-preview-sizer {
+    overflow-y: hidden !important;
+}
+
+/* 仅当命中最大高度且内容仍溢出时，才启用纵向滚动 */
+.canvas-node.cmb-node-scrollable .canvas-node-content {
+    overflow-y: auto !important;
+}
+
+.canvas-node.cmb-node-scrollable .canvas-node-content .markdown-preview-view,
+.canvas-node.cmb-node-scrollable .canvas-node-content .markdown-preview-sizer {
+    overflow-y: auto !important;
+}
+
+/* Webkit 浏览器滚动条样式 */
+.canvas-node.cmb-node-scrollable .canvas-node-content::-webkit-scrollbar {
+    width: 6px !important;
+}
+
+.canvas-node.cmb-node-scrollable .canvas-node-content::-webkit-scrollbar-track {
+    background: transparent !important;
+}
+
+.canvas-node.cmb-node-scrollable .canvas-node-content::-webkit-scrollbar-thumb {
+    background-color: rgba(0, 0, 0, 0.3) !important;
+    border-radius: 3px !important;
+}
+
+.canvas-node.cmb-node-scrollable .canvas-node-content::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(0, 0, 0, 0.5) !important;
+}
+
+/* 暗黑模式滚动条 */
+@media (prefers-color-scheme: dark) {
+    .canvas-node.cmb-node-scrollable .canvas-node-content {
+        scrollbar-color: rgba(255, 255, 255, 0.3) transparent !important;
+    }
+
+    .canvas-node.cmb-node-scrollable .canvas-node-content::-webkit-scrollbar-thumb {
+        background-color: rgba(255, 255, 255, 0.3) !important;
+    }
+
+    .canvas-node.cmb-node-scrollable .canvas-node-content::-webkit-scrollbar-thumb:hover {
+        background-color: rgba(255, 255, 255, 0.5) !important;
+    }
+}
+
+.canvas-mindmap-edit-textarea {
+    width: 100% !important;
+    height: 200px !important;
+}
+
+.canvas-mindmap-delete-overlay,
+.canvas-mindmap-delete-edge-overlay {
+    position: fixed !important;
+    inset: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 16px !important;
+    background-color: rgba(0, 0, 0, 0.38) !important;
+    z-index: 99999 !important;
+}
+
+.canvas-mindmap-delete-panel,
+.canvas-mindmap-delete-edge-panel {
+    width: min(100%, 470px) !important;
+    background-color: var(--background-primary, white) !important;
+    border: 3px solid #e74c3c !important;
+    border-radius: 15px !important;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.24) !important;
+    padding: 18px 20px !important;
+    color: var(--text-normal, inherit) !important;
+}
+
+.canvas-mindmap-delete-title {
+    font-size: 12px !important;
+    font-weight: bold !important;
+    text-align: center !important;
+    margin-bottom: 14px !important;
+}
+
+.canvas-mindmap-delete-modal,
+.canvas-mindmap-delete-edge-modal,
+.canvas-mindmap-delete-modal .modal,
+.canvas-mindmap-delete-edge-modal .modal {
+    border: 3px solid #e74c3c !important;
+    border-radius: 15px !important;
+}
+
+.canvas-mindmap-delete-modal .modal-title,
+.canvas-mindmap-delete-edge-modal .modal-title {
+    font-size: 12px !important;
+    font-weight: bold !important;
+}
+
+.canvas-mindmap-delete-modal--simple,
+.canvas-mindmap-delete-modal--simple,
+.canvas-mindmap-delete-modal--simple .modal {
+    max-width: 340px !important;
+}
+
+.canvas-mindmap-delete-modal--simple .modal-content {
+    max-width: 320px !important;
+}
+
+.canvas-mindmap-delete-modal--cascade,
+.canvas-mindmap-delete-modal--cascade,
+.canvas-mindmap-delete-modal--cascade .modal {
+    max-width: 470px !important;
+}
+
+.canvas-mindmap-delete-modal--cascade .modal-content {
+    max-width: 450px !important;
+}
+
+.canvas-mindmap-delete-edge-modal--simple,
+.canvas-mindmap-delete-edge-modal--simple,
+.canvas-mindmap-delete-edge-modal--simple .modal {
+    max-width: 340px !important;
+}
+
+.canvas-mindmap-delete-edge-modal--simple .modal-content {
+    max-width: 320px !important;
+}
+
+.canvas-mindmap-delete-description,
+.canvas-mindmap-delete-edge-description {
+    margin-bottom: 15px !important;
+    text-align: center !important;
+    font-size: 12px !important;
+    font-weight: bold !important;
+}
+
+.canvas-mindmap-delete-info {
+    font-size: 12px !important;
+    color: #666 !important;
+    margin-bottom: 15px !important;
+    white-space: pre-line !important;
+}
+
+.canvas-mindmap-delete-actions,
+.canvas-mindmap-delete-edge-actions {
+    display: flex !important;
+    flex-direction: row !important;
+    justify-content: space-around !important;
+    gap: 10px !important;
+    margin-top: 20px !important;
+}
+
+.canvas-mindmap-delete-btn,
+.canvas-mindmap-delete-edge-btn {
+    border: 3px solid #e74c3c !important;
+    border-radius: 15px !important;
+    padding: 8px 16px !important;
+    font-size: 12px !important;
+    font-weight: bold !important;
+    color: #e74c3c !important;
+    background-color: white !important;
+    cursor: pointer !important;
+    min-width: 70px !important;
+    transition: all 0.2s ease !important;
+}
+
+.canvas-mindmap-delete-btn:hover,
+.canvas-mindmap-delete-edge-btn:hover {
+    background-color: #e74c3c !important;
+    color: white !important;
+}
+
+.canvas-mindmap-delete-btn:active,
+.canvas-mindmap-delete-edge-btn:active {
+    background-color: #c0392b !important;
+    color: white !important;
+}
+
+.markdown-reading-view .markdown-preview-view img,
+.markdown-reading-view .markdown-preview-view .image-embed,
+.markdown-source-view.mod-cm6 .cm-content img,
+.markdown-source-view.mod-cm6 .cm-content .image-embed {
+    display: block !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+}
