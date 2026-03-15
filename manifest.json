@@ -1,7 +1,7 @@
 {
   "id": "md-content-formatting",
   "name": "MD Content Formatting",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "minAppVersion": "1.5.0",
   "description": "Format markdown headings and blank lines for Obsidian notes.",
   "author": "local",
