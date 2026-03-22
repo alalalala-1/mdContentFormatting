@@ -5,6 +5,7 @@ const MATH_BLOCK_START_PATTERN = /^\s*\$\$/;
 const ARABIC_DEPTH_PATTERN = /^(\d+(?:\.\d+)*)\b/;
 const THEMATIC_BREAK_PATTERN = /^\s*---\s*$/;
 const CALLOUT_LINE_PATTERN = /^\s*>/;
+const CALLOUT_HEADER_PATTERN = /^\s*>\s*\[![^[\]]+\]/;
 const TABLE_SEPARATOR_PATTERN = /^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*:?-{3,}:?\s*\|?\s*$/;
 const PARAGRAPH_START_PATTERN = /^[A-Za-z0-9\u4e00-\u9fff\u3040-\u30ff\u0400-\u04ff"'“”‘’(\[（【《「『]/;
 const MARKDOWN_IMAGE_PATTERN = /^\s*!\[[^\]]*]\([^)]+\)\s*$/;
@@ -76,6 +77,7 @@ type BlankInsertReason =
   | "beforeHeading"
   | "beforeTable"
   | "beforeThematicBreak"
+  | "betweenCallouts"
   | "afterHeading"
   | "afterList"
   | "afterLongParagraph"
@@ -118,6 +120,7 @@ function createEmptyStats(): FormatStats {
       beforeHeading: 0,
       beforeTable: 0,
       beforeThematicBreak: 0,
+      betweenCallouts: 0,
       afterHeading: 0,
       afterList: 0,
       afterLongParagraph: 0,
@@ -128,6 +131,7 @@ function createEmptyStats(): FormatStats {
       beforeHeading: 0,
       beforeTable: 0,
       beforeThematicBreak: 0,
+      betweenCallouts: 0,
       afterHeading: 0,
       afterList: 0,
       afterLongParagraph: 0,
@@ -654,6 +658,9 @@ function normalizeBlankLines(markdown: string, stats: FormatStats): string {
           index += 1;
           break;
         }
+        if (CALLOUT_HEADER_PATTERN.test(nextTrimmed) && lines.length > 0) {
+          break;
+        }
         if (CALLOUT_LINE_PATTERN.test(nextTrimmed)) {
           lines.push(nextLine);
           index += 1;
@@ -784,6 +791,7 @@ function normalizeBlankLines(markdown: string, stats: FormatStats): string {
     const needBlankBeforeHeading = block.type === "heading" && previous !== null && previous.type !== "heading";
     const needBlankBeforeTable = block.type === "table" && previous !== null;
     const needBlankBeforeThematicBreak = block.type === "thematicBreak" && previous !== null;
+    const needBlankBetweenCallouts = block.type === "callout" && previous !== null && previous.type === "callout";
     const needBlankAfterHeading = previous !== null && previous.type === "heading";
     const needBlankAfterList =
       previous !== null &&
@@ -815,6 +823,7 @@ function normalizeBlankLines(markdown: string, stats: FormatStats): string {
       needBlankBeforeHeading ||
       needBlankBeforeTable ||
       needBlankBeforeThematicBreak ||
+      needBlankBetweenCallouts ||
       needBlankAfterHeading ||
       needBlankAfterList ||
       needBlankAfterLongParagraph ||
@@ -838,6 +847,8 @@ function normalizeBlankLines(markdown: string, stats: FormatStats): string {
       if (needBlankBeforeTable) insertReasons.push("beforeTable");
       if (needBlankBeforeThematicBreak) counter.beforeThematicBreak += 1;
       if (needBlankBeforeThematicBreak) insertReasons.push("beforeThematicBreak");
+      if (needBlankBetweenCallouts) counter.betweenCallouts += 1;
+      if (needBlankBetweenCallouts) insertReasons.push("betweenCallouts");
       if (needBlankAfterHeading) counter.afterHeading += 1;
       if (needBlankAfterHeading) insertReasons.push("afterHeading");
       if (needBlankAfterList) counter.afterList += 1;

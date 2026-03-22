@@ -163,6 +163,20 @@ describe("formatMarkdown", () => {
     expect(output).toBe(["# 1", "", "> [!note]", "> callout 内容", "", "后续正文"].join("\n"));
   });
 
+  it("inserts one blank line between adjacent callouts", () => {
+    const input = ["> [!info] 第一块", "> 说明 A", "> [!warning] 第二块", "> 说明 B"].join("\n");
+    const output = formatMarkdown(input);
+
+    expect(output).toBe(["> [!info] 第一块", "> 说明 A", "", "> [!warning] 第二块", "> 说明 B"].join("\n"));
+  });
+
+  it("keeps one blank line between adjacent callouts when source has many blank lines", () => {
+    const input = ["> [!info] 第一块", "> 说明 A", "", "", "", "> [!warning] 第二块", "> 说明 B"].join("\n");
+    const output = formatMarkdown(input);
+
+    expect(output).toBe(["> [!info] 第一块", "> 说明 A", "", "> [!warning] 第二块", "> 说明 B"].join("\n"));
+  });
+
   it("keeps one blank line after headings", () => {
     const input = ["# 标题", "正文", "## 次级标题", "下一段"].join("\n");
     const output = formatMarkdown(input);
