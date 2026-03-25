@@ -991,12 +991,24 @@ export function formatMarkdown(markdown: string): string {
   return formatMarkdownWithStats(markdown).text;
 }
 
-export function formatMarkdownWithStats(markdown: string): { text: string; stats: FormatStats } {
+export function formatMarkdownContentOnly(markdown: string): string {
+  return formatMarkdownContentOnlyWithStats(markdown).text;
+}
+
+export function formatMarkdownWithStats(
+  markdown: string,
+  options?: { normalizeHeadings?: boolean }
+): { text: string; stats: FormatStats } {
+  const shouldNormalizeHeadings = options?.normalizeHeadings !== false;
   const stats = createEmptyStats();
-  const headingNormalized = normalizeHeadingLevels(markdown, stats);
+  const headingNormalized = shouldNormalizeHeadings ? normalizeHeadingLevels(markdown, stats) : markdown;
   const listMarkerNormalized = normalizeUnorderedListMarkers(headingNormalized, stats);
   const mathDelimiterNormalized = normalizeMathBlockDelimiterIndent(listMarkerNormalized);
   const blankNormalized = normalizeBlankLines(mathDelimiterNormalized, stats);
   const text = normalizeImageCalloutGap(blankNormalized);
   return { text, stats };
+}
+
+export function formatMarkdownContentOnlyWithStats(markdown: string): { text: string; stats: FormatStats } {
+  return formatMarkdownWithStats(markdown, { normalizeHeadings: false });
 }

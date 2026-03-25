@@ -1,5 +1,5 @@
 import { MarkdownView, Notice, Platform, Plugin } from "obsidian";
-import { formatMarkdownWithStats } from "./formatter";
+import { formatMarkdownContentOnlyWithStats, formatMarkdownWithStats } from "./formatter";
 
 type ImageSizingMetrics = {
   noImageRootSkipCount: number;
@@ -31,9 +31,16 @@ export default class MdContentFormattingPlugin extends Plugin {
   async onload(): Promise<void> {
     this.addCommand({
       id: "format-current-note",
-      name: "Format current note",
+      name: "Format current note (headings + content)",
       callback: () => {
         this.formatCurrentNote();
+      }
+    });
+    this.addCommand({
+      id: "format-current-note-content-only",
+      name: "Format current note (content only)",
+      callback: () => {
+        this.formatCurrentNoteContentOnly();
       }
     });
 
@@ -73,6 +80,14 @@ export default class MdContentFormattingPlugin extends Plugin {
   }
 
   private formatCurrentNote(): void {
+    this.formatCurrentNoteInternal("full");
+  }
+
+  private formatCurrentNoteContentOnly(): void {
+    this.formatCurrentNoteInternal("content-only");
+  }
+
+  private formatCurrentNoteInternal(mode: "full" | "content-only"): void {
     const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (!markdownView) {
       new Notice("No active markdown file.");
@@ -81,8 +96,9 @@ export default class MdContentFormattingPlugin extends Plugin {
 
     const editor = markdownView.editor;
     const source = editor.getValue();
-    const { text: formatted, stats } = formatMarkdownWithStats(source);
-    const secondPass = formatMarkdownWithStats(formatted);
+    const formatWithStats = mode === "content-only" ? formatMarkdownContentOnlyWithStats : formatMarkdownWithStats;
+    const { text: formatted, stats } = formatWithStats(source);
+    const secondPass = formatWithStats(formatted);
     const idempotenceChanged = secondPass.text !== formatted;
     const idempotenceFirstDiff = idempotenceChanged ? this.findFirstDiff(formatted, secondPass.text) : null;
     const sourceLineCount = source.split(/\r?\n/).length;
@@ -133,7 +149,7 @@ export default class MdContentFormattingPlugin extends Plugin {
     }
 
     editor.setValue(formatted);
-    new Notice("Markdown formatted.");
+    new Notice(mode === "content-only" ? "Markdown content formatted (headings unchanged)." : "Markdown formatted.");
   }
 
   private scheduleImageSizingForActiveView(trigger: string): void {

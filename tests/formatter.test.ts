@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatMarkdown, formatMarkdownWithStats } from "../src/formatter";
+import { formatMarkdown, formatMarkdownContentOnly, formatMarkdownWithStats } from "../src/formatter";
 
 describe("formatMarkdown", () => {
   it("fixes heading levels by arabic numbering depth", () => {
@@ -9,6 +9,13 @@ describe("formatMarkdown", () => {
     expect(output).toBe(
       ["# 4", "", "## 4.1", "", "### 4.1.1", "", "#### 4.1.1.1", "", "##### 4.1.1.1.1"].join("\n")
     );
+  });
+
+  it("formats content without changing heading levels in content-only mode", () => {
+    const input = ["# 4", "###4.1.1", "正文内容", "| 列1 | 列2 |", "| --- | --- |", "| A | B |"].join("\n");
+    const output = formatMarkdownContentOnly(input);
+
+    expect(output).toBe(["# 4", "", "###4.1.1", "", "正文内容", "", "| 列1 | 列2 |", "| --- | --- |", "| A | B |"].join("\n"));
   });
 
   it("downgrades non-numeric sub-headings relative to parent heading", () => {

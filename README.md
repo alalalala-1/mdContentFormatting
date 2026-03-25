@@ -30,14 +30,15 @@ Obsidian 插件，用于自动整理 Markdown 结构，提升长文档在 Readin
 
 安装插件后，在 Obsidian 命令面板执行：
 
-- `Format current note`
+- `Format current note (headings + content)`
+- `Format current note (content only)`
 
 插件会对当前笔记执行格式化与显示优化。
 
 ## 兼容性
 
 - `minAppVersion`: `1.5.0`
-- 插件版本：`0.1.1`
+- 插件版本：`0.1.2`
 
 ## 开发
 
@@ -52,4 +53,4 @@ npm run build
 ## 仓库与发布
 
 - 仓库：https://github.com/alalalala-1/mdContentFormatting
-- 最新发布：https://github.com/alalalala-1/mdContentFormatting/releases/tag/v0.1.1
+- 最新发布：https://github.com/alalalala-1/mdContentFormatting/releases/tag/v0.1.2
