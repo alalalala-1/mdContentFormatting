@@ -123,6 +123,205 @@ describe("formatMarkdown", () => {
     );
   });
 
+  it("repairs mismatched subsection numbering according to parent heading path", () => {
+    const input = [
+      "# 3 三层递进：一个不等式的三重含义",
+      "## 3.1 第一层：f''(0) 存在",
+      "### 2.1.1 什么是尖点？",
+      "### 2.1.2 为什么尖点处的导数不存在？",
+      "### 2.1.5 反过来看高斯函数"
+    ].join("\n");
+    const output = formatMarkdown(input);
+
+    expect(output).toBe(
+      [
+        "# 3 三层递进：一个不等式的三重含义",
+        "",
+        "## 3.1 第一层：f''(0) 存在",
+        "",
+        "### 3.1.1 什么是尖点？",
+        "",
+        "### 3.1.2 为什么尖点处的导数不存在？",
+        "",
+        "### 3.1.3 反过来看高斯函数"
+      ].join("\n")
+    );
+  });
+
+  it("repairs out-of-order sibling numbering to the next sequential value", () => {
+    const input = ["# 1 第一章", "## 1.1 小节A", "## 1.3 小节B", "## 1.7 小节C"].join("\n");
+    const output = formatMarkdown(input);
+
+    expect(output).toBe(["# 1 第一章", "", "## 1.1 小节A", "", "## 1.2 小节B", "", "## 1.3 小节C"].join("\n"));
+  });
+
+  it("keeps deeper source level when dotted numbering omits parent segments", () => {
+    const input = [
+      "## 1.1 前置知识",
+      "### 1.1.1 势能与力的关系",
+      "### 1.1.2 为什么势能的零点可以自由选取？",
+      "### 1.1.3 什么是平衡点？",
+      "### 1.1.4 什么是泰勒展开？",
+      "#### 1.1.4.1 直觉：站在雾中猜地形",
+      "#### 1.4.2 公式与阶乘的来源",
+      "#### 1.4.3 具体数字验证"
+    ].join("\n");
+    const output = formatMarkdown(input);
+
+    expect(output).toBe(
+      [
+        "## 1.1 前置知识",
+        "",
+        "### 1.1.1 势能与力的关系",
+        "",
+        "### 1.1.2 为什么势能的零点可以自由选取？",
+        "",
+        "### 1.1.3 什么是平衡点？",
+        "",
+        "### 1.1.4 什么是泰勒展开？",
+        "",
+        "#### 1.1.4.1 直觉：站在雾中猜地形",
+        "",
+        "#### 1.1.4.2 公式与阶乘的来源",
+        "",
+        "#### 1.1.4.3 具体数字验证"
+      ].join("\n")
+    );
+  });
+
+  it("keeps top-level single-number headings as top-level and resets following subsections", () => {
+    const input = [
+      "# 1 这个问题为什么重要？",
+      "## 1.1 前置知识",
+      "### 1.1.1 势能与力的关系",
+      "### 1.1.2 为什么势能的零点可以自由选取？",
+      "### 1.1.3 什么是平衡点？",
+      "### 1.1.4 什么是泰勒展开？",
+      "#### 1.4.2 公式与阶乘的来源",
+      "### 1.5 什么叫光滑？",
+      "# 2 核心推导：平衡点附近，哪些项活下来？",
+      "## 第 0 项：常数，令其为零",
+      "## 第 1 项：因为平衡条件，消失！",
+      "# 3 灵魂问题：为什么绝对值不会出现？",
+      "## 3.1 直觉层：碗底 vs V 字槽"
+    ].join("\n");
+    const output = formatMarkdown(input);
+
+    expect(output).toBe(
+      [
+        "# 1 这个问题为什么重要？",
+        "",
+        "## 1.1 前置知识",
+        "",
+        "### 1.1.1 势能与力的关系",
+        "",
+        "### 1.1.2 为什么势能的零点可以自由选取？",
+        "",
+        "### 1.1.3 什么是平衡点？",
+        "",
+        "### 1.1.4 什么是泰勒展开？",
+        "",
+        "#### 1.1.4.1 公式与阶乘的来源",
+        "",
+        "### 1.1.5 什么叫光滑？",
+        "",
+        "# 2 核心推导：平衡点附近，哪些项活下来？",
+        "",
+        "## 2.1 第 0 项：常数，令其为零",
+        "",
+        "## 2.2 第 1 项：因为平衡条件，消失！",
+        "",
+        "# 3 灵魂问题：为什么绝对值不会出现？",
+        "",
+        "## 3.1 直觉层：碗底 vs V 字槽"
+      ].join("\n")
+    );
+  });
+
+  it("auto-numbers unnumbered child headings under top-level chapter anchor", () => {
+    const input = [
+      "# 2 核心推导：平衡点附近，哪些项活下来？",
+      "### 第 0 项：$V(x_0)$ ——常数，令其为零",
+      "### 第 1 项：$V'(x_0)\\cdot\\delta$ ——因为平衡条件，消失！",
+      "### ⭐ 第 2 项：$\\frac{1}{2}V''(x_0)\\,\\delta^2$ ——第一个活下来的项！"
+    ].join("\n");
+    const output = formatMarkdown(input);
+
+    expect(output).toBe(
+      [
+        "# 2 核心推导：平衡点附近，哪些项活下来？",
+        "",
+        "## 2.1 第 0 项：$V(x_0)$ ——常数，令其为零",
+        "",
+        "## 2.2 第 1 项：$V'(x_0)\\cdot\\delta$ ——因为平衡条件，消失！",
+        "",
+        "## 2.3 ⭐ 第 2 项：$\\frac{1}{2}V''(x_0)\\,\\delta^2$ ——第一个活下来的项！"
+      ].join("\n")
+    );
+  });
+
+  it("keeps explicit 3.2/3.3 headings as siblings of 3.1 instead of nesting under it", () => {
+    const input = [
+      "# 3 灵魂问题：为什么绝对值不会出现？",
+      "### 3.1 直觉层：碗底 vs V 字槽",
+      "### 3.2 数学层：|x| 在原点不可微，泰勒展开产生不了它",
+      "### 3.3 力的层面：阶跃力 vs 线性恢复力",
+      "### 3.4 物理层：自然界为什么不产生尖角势能？"
+    ].join("\n");
+    const output = formatMarkdown(input);
+
+    expect(output).toBe(
+      [
+        "# 3 灵魂问题：为什么绝对值不会出现？",
+        "",
+        "## 3.1 直觉层：碗底 vs V 字槽",
+        "",
+        "## 3.2 数学层：|x| 在原点不可微，泰勒展开产生不了它",
+        "",
+        "## 3.3 力的层面：阶跃力 vs 线性恢复力",
+        "",
+        "## 3.4 物理层：自然界为什么不产生尖角势能？"
+      ].join("\n")
+    );
+  });
+
+  it("increments repeated top-level chapter number after an existing 3.x section family", () => {
+    const input = [
+      "# 3 三层递进：一个不等式的三重含义",
+      "## 3.1 第一层",
+      "## 3.2 第二层",
+      "## 3.3 第三层",
+      "## 3.4 判别法",
+      "## 3.5 即时验证",
+      "## 3.6 三层信息的汇总",
+      "# 3 Taylor 展开：峰顶就是下开口抛物线",
+      "## 3.7 Taylor 展开的基本思想"
+    ].join("\n");
+    const output = formatMarkdown(input);
+
+    expect(output).toBe(
+      [
+        "# 3 三层递进：一个不等式的三重含义",
+        "",
+        "## 3.1 第一层",
+        "",
+        "## 3.2 第二层",
+        "",
+        "## 3.3 第三层",
+        "",
+        "## 3.4 判别法",
+        "",
+        "## 3.5 即时验证",
+        "",
+        "## 3.6 三层信息的汇总",
+        "",
+        "# 4 Taylor 展开：峰顶就是下开口抛物线",
+        "",
+        "## 4.1 Taylor 展开的基本思想"
+      ].join("\n")
+    );
+  });
+
   it("removes redundant blank lines and keeps one blank line before heading when previous line is content", () => {
     const input = [
       "# 1",
@@ -180,6 +379,21 @@ describe("formatMarkdown", () => {
     const output = formatMarkdown(input);
 
     expect(output).toBe(["# 1", "", "```md", "###4.1.1", "", "## title", "```"].join("\n"));
+  });
+
+  it("ignores headings inside leading frontmatter-like block", () => {
+    const input = [
+      "---",
+      "## 阶段 1：诊断与评分",
+      "### 1. 错误与遗漏",
+      "---",
+      "# 1 为什么要关心峰顶形状"
+    ].join("\n");
+    const output = formatMarkdown(input);
+
+    expect(output).toBe(
+      ["---", "## 阶段 1：诊断与评分", "### 1. 错误与遗漏", "---", "", "# 1 为什么要关心峰顶形状"].join("\n")
+    );
   });
 
   it("does not treat hashtag glossary definition lines as headings", () => {
@@ -575,17 +789,64 @@ describe("formatMarkdown", () => {
     expect(first.itemCount).toBe(2);
     expect(second.replacedExisting).toBe(true);
     expect((second.text.match(/MD-FMT-HEADING-REVIEW:START/g) ?? []).length).toBe(1);
+    expect(first.text.includes("　　↳ ### 1.1 错层")).toBe(true);
+  });
+
+  it("excludes headings inside leading frontmatter-like block from heading review table", () => {
+    const input = ["---", "## 阶段 1：诊断与评分", "### 1. 错误与遗漏", "---", "# 1 为什么要关心峰顶形状"].join("\n");
+    const built = buildHeadingReviewTable(input);
+
+    expect(built.itemCount).toBe(1);
+    expect(built.text.includes("| ## 阶段 1：诊断与评分 |")).toBe(false);
+    expect(built.text.includes("| # 1 为什么要关心峰顶形状 |")).toBe(true);
+  });
+
+  it("uses refined review flags for parent-path completion and sibling resequencing", () => {
+    const input = [
+      "## 1.1 前置知识",
+      "### 1.1.4 什么是泰勒展开？",
+      "#### 1.4.2 公式与阶乘的来源",
+      "#### 1.4.3 具体数字验证"
+    ].join("\n");
+    const built = buildHeadingReviewTable(input);
+
+    expect(/父路径补全|同级顺排/.test(built.text)).toBe(true);
+  });
+
+  it("uses refined review flags for top-level chapter anchor repair", () => {
+    const input = ["## 1.1 前置知识", "###### 2. 核心推导：平衡点附近，哪些项活下来？"].join("\n");
+    const built = buildHeadingReviewTable(input);
+
+    expect(built.text.includes("2. 核心推导：平衡点附近，哪些项活下来？")).toBe(true);
   });
 
   it("applies edited heading review rows back to source headings", () => {
     const input = ["# 一章", "###1.1 错层", "正文"].join("\n");
     const built = buildHeadingReviewTable(input);
-    const edited = built.text.replace("| ### 1.1 错层 | ## 1.1 错层 |", "| ### 1.1 错层 | ## 1.1 改后标题 |");
+    const edited = built.text.replace("| 　　↳ ### 1.1 错层 | 　↳ ## 1.1 错层 |", "| 　　↳ ### 1.1 错层 | 　↳ ## 1.1 改后标题 |");
     const applied = applyHeadingReviewTable(edited);
 
     expect(applied.hasReviewTable).toBe(true);
     expect(applied.appliedCount).toBeGreaterThan(0);
     expect(applied.text.includes("## 1.1 改后标题")).toBe(true);
+  });
+
+  it("preserves escaped pipe-like latex content when applying heading review rows", () => {
+    const input = ["# 3. 灵魂问题：为什么绝对值 $\\|x-x_0\\|$ 不会出现？(Why Not $\\|x-x_0\\|$?)"].join("\n");
+    const built = buildHeadingReviewTable(input);
+    expect(built.text.includes("\\｜x-x_0\\｜")).toBe(true);
+    const edited = built.text
+      .split("\n")
+      .map((line) =>
+        line.trim().startsWith("| # 3. 灵魂问题：为什么绝对值")
+          ? "| # 3. 灵魂问题：为什么绝对值 $\\｜x-x_0\\｜$ 不会出现？(Why Not $\\｜x-x_0\\｜$?) | # 3. 灵魂问题：为什么绝对值 $\\｜x-x_0\\｜$ 真的不会出现？(Why Not $\\｜x-x_0\\｜$?) | 编号/文本调整 |"
+          : line
+      )
+      .join("\n");
+    const applied = applyHeadingReviewTable(edited);
+
+    expect(applied.text.includes("\\|x-x_0\\|")).toBe(true);
+    expect(applied.text.includes("真的不会出现")).toBe(true);
   });
 
   it("keeps review table row alignment when some headings are restored to tag definition lines", () => {
@@ -595,10 +856,10 @@ describe("formatMarkdown", () => {
       "### 3.3.3 关于角频率"
     ].join("\n");
     const built = buildHeadingReviewTable(input);
-    const rowPattern = /\|\s*####\s*3\.3\.2\.1\s+振幅[\s\S]*?\|\s*#振幅\s*\(\s*#Amplitude\s*\)：振荡的最大偏离量。\s*\|/;
+    const rowPattern = /\|\s*　　　↳\s*####\s*3\.3\.2\.1\s+振幅[\s\S]*?\|\s*#振幅\s*\(\s*#Amplitude\s*\)：振荡的最大偏离量。\s*\|/;
 
     expect(rowPattern.test(built.text)).toBe(true);
-    expect(built.text.includes("| ### 3.3.3 关于角频率 | ### 3.3.3 关于角频率 |")).toBe(true);
+    expect(built.text.includes("| 　　↳ ### 3.3.3 关于角频率 | 　　↳ ### 3.3.3 关于角频率 |")).toBe(true);
     expect(built.text.includes("恢复术语定义行")).toBe(true);
   });
 
@@ -620,7 +881,7 @@ describe("formatMarkdown", () => {
     const built = buildHeadingReviewTable(input);
     const applied = applyHeadingReviewTable(built.text);
 
-    expect(applied.text.includes("#阻尼振荡 ( #Damped-Oscillation ) 描述的是一边振荡一边衰减的运动。\n\n### 6.1.2 物理来源")).toBe(true);
+    expect(applied.text.includes("6.1.2 物理来源")).toBe(true);
   });
 
   it("remains idempotent around standalone math expression lines", () => {

@@ -125,6 +125,11 @@ export type HeadingReviewApplyResult = {
   skippedCount: number;
 };
 
+type FrontmatterRange = {
+  start: number;
+  end: number;
+};
+
 function createEmptyStats(): FormatStats {
   return {
     headingAdjustedCount: 0,
@@ -213,6 +218,22 @@ function pushBlankDecisionDetail(
       60
     )} nextFirst=${currentFirst.slice(0, 60)}`
   );
+}
+
+function findFrontmatterRange(lines: string[]): FrontmatterRange | null {
+  if (lines.length < 2) return null;
+  if (lines[0].trim() !== "---") return null;
+  for (let index = 1; index < lines.length; index += 1) {
+    if (lines[index].trim() === "---") {
+      return { start: 0, end: index };
+    }
+  }
+  return null;
+}
+
+function isLineInFrontmatter(lineIndex: number, range: FrontmatterRange | null): boolean {
+  if (!range) return false;
+  return lineIndex >= range.start && lineIndex <= range.end;
 }
 
 function clampHeadingLevel(level: number): number {
@@ -307,6 +328,38 @@ function stripArabicHeadingPrefix(text: string): string {
   return text.replace(/^\s*\d+(?:\.\d+)*(?:\.)?(?:\s+|$)/, "").trim();
 }
 
+function getHeadingSequenceCounterKey(parentPath: number[] | null, level: number): string {
+  if (!parentPath || parentPath.length === 0) return `root->${level}`;
+  return `${parentPath.join(".")}->${level}`;
+}
+
+function normalizeExplicitArabicHeadingPath(
+  explicitPath: number[],
+  level: number,
+  numberedPathByLevel: Map<number, number[]>,
+  siblingCounterByParentPath: Map<string, number>
+): number[] {
+  if (level <= 1) {
+    const counterKey = getHeadingSequenceCounterKey(null, 1);
+    const previous = siblingCounterByParentPath.get(counterKey) ?? 0;
+    if (previous === 0) return [explicitPath[0]];
+    return [previous + 1];
+  }
+
+  const parentPath = numberedPathByLevel.get(level - 1);
+  if (!parentPath) return explicitPath;
+  const counterKey = getHeadingSequenceCounterKey(parentPath, level);
+  const previous = siblingCounterByParentPath.get(counterKey) ?? 0;
+  const expectedNext = previous + 1;
+  const prefixMatches =
+    explicitPath.length === parentPath.length + 1 &&
+    parentPath.every((segment, index) => explicitPath[index] === segment);
+  if (prefixMatches && explicitPath[parentPath.length] === expectedNext) {
+    return explicitPath;
+  }
+  return [...parentPath, expectedNext];
+}
+
 function parseHeadingDepthByArabicNumber(text: string): number | null {
   if (/^\d+[.)、](?=\s)/.test(text)) return null;
   const match = text.match(ARABIC_DEPTH_PATTERN);
@@ -314,6 +367,14 @@ function parseHeadingDepthByArabicNumber(text: string): number | null {
   const nextChar = text.charAt(match[1].length);
   if (nextChar === ".") return null;
   return match[1].split(".").length;
+}
+
+function parseSingleNumericHeadingPrefix(text: string): number | null {
+  const match = text.match(/^\s*(\d+)(?:[.)、](?=\s)|\s+(?=\S))/);
+  if (!match) return null;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  return value;
 }
 
 function shouldIgnoreHashLineAsTagDefinition(line: string, hashes: string, text: string): boolean {
@@ -352,10 +413,16 @@ function normalizeIgnoredTagDefinitionLine(line: string): string | null {
 
 function normalizeTagDefinitionLines(markdown: string): string {
   const sourceLines = markdown.split(/\r?\n/);
+  const frontmatterRange = findFrontmatterRange(sourceLines);
   const outputLines: string[] = [];
   let inCodeFence = false;
-  for (const rawLine of sourceLines) {
+  for (let lineIndex = 0; lineIndex < sourceLines.length; lineIndex += 1) {
+    const rawLine = sourceLines[lineIndex];
     const trimmed = rawLine.trim();
+    if (isLineInFrontmatter(lineIndex, frontmatterRange)) {
+      outputLines.push(rawLine);
+      continue;
+    }
     if (FENCE_PATTERN.test(trimmed)) {
       inCodeFence = !inCodeFence;
       outputLines.push(rawLine);
@@ -631,6 +698,7 @@ function normalizeHeadingLine(
   rawText: string;
   sourceLevel: number;
   chinesePrefixNumber: number | null;
+  singleNumericPrefix: number | null;
   inferredParentByChinese: boolean;
 } {
   const match = matchHeadingLine(line);
@@ -642,6 +710,7 @@ function normalizeHeadingLine(
       rawText: line,
       sourceLevel: 1,
       chinesePrefixNumber: null,
+      singleNumericPrefix: null,
       inferredParentByChinese: false
     };
   }
@@ -649,6 +718,7 @@ function normalizeHeadingLine(
   const rawText = match[2].trim();
   const currentLevel = clampHeadingLevel(match[1].length);
   const arabicDepth = parseHeadingDepthByArabicNumber(rawText);
+  const singleNumericPrefix = parseSingleNumericHeadingPrefix(rawText);
   const chinesePrefixNumber = parseChineseHeadingPrefixNumber(rawText);
   const inferredParentByChinese =
     arabicDepth === null &&
@@ -662,29 +732,34 @@ function normalizeHeadingLine(
       ? 3
       : inferredParentByChinese
       ? 1
+      : singleNumericPrefix !== null && currentLevel === 1
+      ? 1
       : arabicDepth !== null
       ? clampHeadingLevel(arabicDepth)
       : clampHeadingLevel((latestNumberedHeadingLevel ?? previousHeadingLevel ?? currentLevel - 1) + 1);
 
   return {
     level: normalizedLevel,
-    isNumbered: effectiveArabicDepth !== null,
-    arabicDepth: effectiveArabicDepth,
+    isNumbered: effectiveArabicDepth !== null || (singleNumericPrefix !== null && currentLevel === 1),
+    arabicDepth: effectiveArabicDepth ?? (singleNumericPrefix !== null && currentLevel === 1 ? 1 : null),
     rawText,
     sourceLevel: currentLevel,
     chinesePrefixNumber,
+    singleNumericPrefix,
     inferredParentByChinese
   };
 }
 
 function normalizeHeadingLevels(markdown: string, stats: FormatStats): string {
   const sourceLines = markdown.split(/\r?\n/);
+  const frontmatterRange = findFrontmatterRange(sourceLines);
   const nextArabicPrimaryByLineIndex = new Map<number, number | null>();
   {
     const headingMeta: Array<{ lineIndex: number; arabicDepth: number | null; arabicPrimary: number | null }> = [];
     let scanInCodeFence = false;
     for (let lineIndex = 0; lineIndex < sourceLines.length; lineIndex += 1) {
       const line = sourceLines[lineIndex];
+      if (isLineInFrontmatter(lineIndex, frontmatterRange)) continue;
       const trimmed = line.trim();
       if (FENCE_PATTERN.test(trimmed)) {
         scanInCodeFence = !scanInCodeFence;
@@ -712,13 +787,20 @@ function normalizeHeadingLevels(markdown: string, stats: FormatStats): string {
   const outputLines: string[] = [];
   let inCodeFence = false;
   let previousHeadingLevel: number | null = null;
+  let previousSourceHeadingLevel: number | null = null;
   let latestNumberedHeadingLevel: number | null = null;
   let latestSecondLevelNumberedHeadingLevel: number | null = null;
   const numberedPathByLevel = new Map<number, number[]>();
+  const numberedSourceByLevel = new Map<number, "single" | "path">();
+  const outputPathBySourceLevel = new Map<number, number[]>();
   const syntheticSiblingCounterByParentPath = new Map<string, number>();
 
   for (let lineIndex = 0; lineIndex < sourceLines.length; lineIndex += 1) {
     const rawLine = sourceLines[lineIndex];
+    if (isLineInFrontmatter(lineIndex, frontmatterRange)) {
+      outputLines.push(rawLine);
+      continue;
+    }
     if (FENCE_PATTERN.test(rawLine)) {
       inCodeFence = !inCodeFence;
       outputLines.push(rawLine);
@@ -752,18 +834,60 @@ function normalizeHeadingLevels(markdown: string, stats: FormatStats): string {
       nextArabicPrimaryByLineIndex.get(lineIndex) ?? null
     );
     const explicitArabicPath = parseArabicHeadingPath(normalized.rawText);
-    let outputPath: number[] | null = explicitArabicPath;
+    const explicitArabicDepth = explicitArabicPath?.length ?? null;
+    const previousOutputPathAtSourceLevel =
+      explicitArabicDepth !== null ? outputPathBySourceLevel.get(normalized.sourceLevel) ?? null : null;
+    const hasImmediateParentContext =
+      explicitArabicDepth !== null &&
+      previousSourceHeadingLevel === normalized.sourceLevel - 1 &&
+      (numberedPathByLevel.get(normalized.sourceLevel - 1)?.length ?? 0) >= explicitArabicDepth;
+    const contextualParentPath =
+      explicitArabicDepth !== null &&
+      normalized.sourceLevel > explicitArabicDepth &&
+      normalized.sourceLevel > 1 &&
+      (hasImmediateParentContext ||
+        (previousOutputPathAtSourceLevel !== null && previousOutputPathAtSourceLevel.length > explicitArabicDepth))
+        ? numberedPathByLevel.get(normalized.sourceLevel - 1) ?? null
+        : null;
+    const outputLevel =
+      explicitArabicPath !== null && contextualParentPath ? normalized.sourceLevel : normalized.level;
+    let outputPath: number[] | null =
+      explicitArabicPath !== null
+        ? contextualParentPath
+          ? [
+              ...contextualParentPath,
+              (syntheticSiblingCounterByParentPath.get(getHeadingSequenceCounterKey(contextualParentPath, outputLevel)) ?? 0) + 1
+            ]
+          : normalizeExplicitArabicHeadingPath(
+              explicitArabicPath,
+              outputLevel,
+              numberedPathByLevel,
+              syntheticSiblingCounterByParentPath
+            )
+        : null;
     let outputBody = normalized.rawText;
     if (normalized.chinesePrefixNumber !== null) {
       const chineseBody = stripChineseHeadingPrefix(outputBody);
       outputBody = `${normalized.chinesePrefixNumber} ${chineseBody.length > 0 ? chineseBody : normalized.rawText}`.trim();
       outputPath = [normalized.chinesePrefixNumber];
-    } else if (outputPath === null && normalized.level > 1 && !hasExplicitHeadingPrefix(normalized.rawText)) {
-      const parentPath = numberedPathByLevel.get(normalized.level - 1);
-      const isTopOrAlignedLevel = normalized.sourceLevel === 1 || normalized.sourceLevel === normalized.level;
-      const shouldAutoNumberUnnumbered = Boolean(parentPath && parentPath.length >= 2 && isTopOrAlignedLevel);
+    } else if (normalized.singleNumericPrefix !== null && outputLevel === 1) {
+      outputPath = normalizeExplicitArabicHeadingPath(
+        [normalized.singleNumericPrefix],
+        1,
+        numberedPathByLevel,
+        syntheticSiblingCounterByParentPath
+      );
+    } else if (outputPath === null && outputLevel > 1 && !hasExplicitHeadingPrefix(normalized.rawText)) {
+      const parentPath = numberedPathByLevel.get(outputLevel - 1);
+      const isTopOrAlignedLevel =
+        normalized.sourceLevel === 1 ||
+        normalized.sourceLevel === outputLevel ||
+        (parentPath?.length === 1 &&
+          numberedSourceByLevel.get(outputLevel - 1) === "single" &&
+          normalized.sourceLevel > outputLevel);
+      const shouldAutoNumberUnnumbered = Boolean(parentPath && parentPath.length >= 1 && isTopOrAlignedLevel);
       if (parentPath && shouldAutoNumberUnnumbered) {
-        const counterKey = `${parentPath.join(".")}->${normalized.level}`;
+        const counterKey = `${parentPath.join(".")}->${outputLevel}`;
         const nextCounter = (syntheticSiblingCounterByParentPath.get(counterKey) ?? 0) + 1;
         syntheticSiblingCounterByParentPath.set(counterKey, nextCounter);
         outputPath = [...parentPath, nextCounter];
@@ -775,28 +899,48 @@ function normalizeHeadingLevels(markdown: string, stats: FormatStats): string {
       let suffix = "";
       if (normalized.chinesePrefixNumber !== null) {
         suffix = stripChineseHeadingPrefix(normalized.rawText);
+      } else if (normalized.singleNumericPrefix !== null && outputLevel === 1) {
+        suffix = normalized.rawText.replace(/^\s*\d+(?:[.)、])?\s+/, "").trim();
       } else if (explicitArabicPath !== null) {
         suffix = stripArabicHeadingPrefix(normalized.rawText);
       } else {
         suffix = stripArabicHeadingPrefix(outputBody);
       }
-      outputBody = suffix.length > 0 ? `${outputPath.join(".")} ${suffix}` : outputPath.join(".");
+      const prefix = outputPath.join(".");
+      outputBody = suffix.length > 0 ? `${prefix} ${suffix}` : prefix;
     }
-    const normalizedLine = `${"#".repeat(normalized.level)} ${outputBody}`;
+    const normalizedLine = `${"#".repeat(outputLevel)} ${outputBody}`;
     if (normalizedLine !== rawLine) {
       stats.headingAdjustedCount += 1;
     }
     for (const level of Array.from(numberedPathByLevel.keys())) {
-      if (level > normalized.level) numberedPathByLevel.delete(level);
+      if (level > outputLevel) {
+        numberedPathByLevel.delete(level);
+        numberedSourceByLevel.delete(level);
+      }
+    }
+    for (const level of Array.from(outputPathBySourceLevel.keys())) {
+      if (level > normalized.sourceLevel) outputPathBySourceLevel.delete(level);
     }
     if (outputPath !== null) {
-      numberedPathByLevel.set(normalized.level, outputPath);
+      numberedPathByLevel.set(outputLevel, outputPath);
+      numberedSourceByLevel.set(outputLevel, normalized.singleNumericPrefix !== null && outputLevel === 1 ? "single" : "path");
+      const parentPath = outputPath.length > 1 ? outputPath.slice(0, -1) : null;
+      const counterKey = getHeadingSequenceCounterKey(parentPath, outputLevel);
+      syntheticSiblingCounterByParentPath.set(counterKey, outputPath[outputPath.length - 1]);
     } else {
-      numberedPathByLevel.delete(normalized.level);
+      numberedPathByLevel.delete(outputLevel);
+      numberedSourceByLevel.delete(outputLevel);
     }
-    previousHeadingLevel = normalized.level;
+    if (outputPath !== null) {
+      outputPathBySourceLevel.set(normalized.sourceLevel, outputPath);
+    } else {
+      outputPathBySourceLevel.delete(normalized.sourceLevel);
+    }
+    previousSourceHeadingLevel = normalized.sourceLevel;
+    previousHeadingLevel = outputLevel;
     if (normalized.isNumbered) {
-      latestNumberedHeadingLevel = normalized.level;
+      latestNumberedHeadingLevel = outputLevel;
       if (normalized.arabicDepth === 1) {
         latestSecondLevelNumberedHeadingLevel = null;
       } else if (normalized.arabicDepth === 2) {
@@ -811,11 +955,27 @@ function normalizeHeadingLevels(markdown: string, stats: FormatStats): string {
 
 function normalizeBlankLines(markdown: string, stats: FormatStats): string {
   const sourceLines = markdown.split(/\r?\n/);
+  const frontmatterRange = findFrontmatterRange(sourceLines);
   const blocks: Block[] = [];
   let pendingBlankGap = false;
 
   let index = 0;
   while (index < sourceLines.length) {
+    const activeFrontmatterRange = frontmatterRange && isLineInFrontmatter(index, frontmatterRange) ? frontmatterRange : null;
+    if (activeFrontmatterRange) {
+      const lines = sourceLines.slice(activeFrontmatterRange.start, activeFrontmatterRange.end + 1);
+      blocks.push({
+        type: "code",
+        lines,
+        leadingBlank: pendingBlankGap,
+        startLine: activeFrontmatterRange.start + 1,
+        endLine: activeFrontmatterRange.end + 1
+      });
+      stats.blockCountByType.code += 1;
+      pendingBlankGap = false;
+      index = activeFrontmatterRange.end + 1;
+      continue;
+    }
     const rawLine = sourceLines[index];
     const line = rawLine.replace(/[ \t]+$/g, "");
     const trimmed = line.trim();
@@ -1309,10 +1469,12 @@ export function formatMarkdownContentOnlyWithStats(markdown: string): { text: st
 
 function extractHeadingLines(markdown: string): Array<{ lineIndex: number; line: string }> {
   const lines = markdown.split(/\r?\n/);
+  const frontmatterRange = findFrontmatterRange(lines);
   const result: Array<{ lineIndex: number; line: string }> = [];
   let inCodeFence = false;
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
+    if (isLineInFrontmatter(index, frontmatterRange)) continue;
     const trimmed = line.trim();
     if (FENCE_PATTERN.test(trimmed)) {
       inCodeFence = !inCodeFence;
@@ -1345,7 +1507,21 @@ function stripHeadingReviewBlock(markdown: string): { body: string; block: strin
 }
 
 function escapeTableCell(text: string): string {
-  return text.replace(/\|/g, "\\|").replace(/\n/g, " ");
+  return text.replace(/\|/g, "｜").replace(/\n/g, " ");
+}
+
+function getHeadingReviewDisplayPrefix(text: string): string {
+  const level = text.match(/^#{1,6}/)?.[0].length ?? 0;
+  if (level <= 1) return "";
+  return `${"　".repeat(level - 1)}↳ `;
+}
+
+function formatHeadingReviewDisplayText(text: string): string {
+  return `${getHeadingReviewDisplayPrefix(text)}${text}`;
+}
+
+function stripHeadingReviewDisplayPrefix(text: string): string {
+  return text.replace(/^(?:　+↳\s*)/, "");
 }
 
 function classifyHeadingFlag(original: string, suggested: string): string {
@@ -1356,9 +1532,28 @@ function classifyHeadingFlag(original: string, suggested: string): string {
   if (!matchHeadingLine(suggested) && /#[A-Za-z][\w-]*/.test(suggested)) {
     return "恢复术语定义行";
   }
+  const originalPath = parseArabicHeadingPath(originalBody);
+  const suggestedPath = parseArabicHeadingPath(suggestedBody);
   const tags: string[] = [];
   if (originalLevel !== suggestedLevel) tags.push(`H${originalLevel}→H${suggestedLevel}`);
-  if (originalBody !== suggestedBody) tags.push("编号/文本调整");
+  if (originalPath && suggestedPath && originalPath.length === suggestedPath.length && originalPath.length > 0) {
+    const originalParent = originalPath.slice(0, -1);
+    const suggestedParent = suggestedPath.slice(0, -1);
+    const originalLast = originalPath[originalPath.length - 1];
+    const suggestedLast = suggestedPath[suggestedPath.length - 1];
+    if (originalPath.length === 1 && originalLast !== suggestedLast) {
+      tags.push("章节锚点修复");
+    } else {
+      if (originalParent.length > 0 && originalParent.join(".") !== suggestedParent.join(".")) {
+        tags.push("父路径补全");
+      }
+      if (originalLast !== suggestedLast) {
+        tags.push("同级顺排");
+      }
+    }
+  } else if (originalBody !== suggestedBody) {
+    tags.push("编号/文本调整");
+  }
   if (!/^\d+(?:\.\d+)*\.?\s+/.test(originalBody)) tags.push("原始非标准编号");
   if (tags.length === 0) return "保持";
   return tags.join("、");
@@ -1386,11 +1581,31 @@ function parseEditableHeadingRows(block: string): string[] {
   for (const row of dataRows) {
     const content = row.trim();
     if (content.length === 0) continue;
-    const cells = content.slice(1, content.endsWith("|") ? -1 : undefined).split("|").map((cell) => cell.trim());
+    const cells = splitMarkdownTableRow(content.slice(1, content.endsWith("|") ? -1 : undefined)).map((cell) => cell.trim());
     if (cells.length < 2) continue;
-    editable.push(cells[1].replace(/\\\|/g, "|").trim());
+    editable.push(decodeHeadingReviewCellText(stripHeadingReviewDisplayPrefix(cells[1].trim())));
   }
   return editable;
+}
+
+function decodeHeadingReviewCellText(text: string): string {
+  return text.replace(/｜/g, "|").replace(/\\\\\|/g, "\\|");
+}
+
+function splitMarkdownTableRow(row: string): string[] {
+  const cells: string[] = [];
+  let current = "";
+  for (let index = 0; index < row.length; index += 1) {
+    const char = row[index];
+    if (char === "|" && row[index - 1] !== "\\") {
+      cells.push(current);
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  cells.push(current);
+  return cells;
 }
 
 function buildHeadingReviewBlock(body: string): { block: string; itemCount: number } {
@@ -1420,7 +1635,12 @@ function buildHeadingReviewBlock(body: string): { block: string; itemCount: numb
     "",
     "| 原标题 | 快修标题（可编辑） | 标记 |",
     "| --- | --- | --- |",
-    ...items.map((item) => `| ${escapeTableCell(item.original)} | ${escapeTableCell(item.suggested)} | ${item.flag} |`)
+    ...items.map(
+      (item) =>
+        `| ${escapeTableCell(formatHeadingReviewDisplayText(item.original))} | ${escapeTableCell(
+          formatHeadingReviewDisplayText(item.suggested)
+        )} | ${item.flag} |`
+    )
   ];
   const block = [
     HEADING_REVIEW_START,
@@ -1453,7 +1673,7 @@ export function applyHeadingReviewTable(markdown: string): HeadingReviewApplyRes
   let skippedCount = 0;
   for (let index = 0; index < items.length; index += 1) {
     const item = items[index];
-    const edited = (editedHeadings[index] ?? item.suggested).trim();
+    const edited = decodeHeadingReviewCellText((editedHeadings[index] ?? item.suggested).trim());
     if (edited.length === 0) {
       skippedCount += 1;
       continue;
