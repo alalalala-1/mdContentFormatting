@@ -14,6 +14,9 @@ const UNORDERED_LIST_LINE_PATTERN = /^(\s*)([-+*])(\s+)(.*)$/;
 const LIST_ITEM_PATTERN =
   /^\s{0,3}(?:[-+*]|(?:\d+|[a-zA-Z]+|[ivxlcdmIVXLCDM]+)[.)]|(?:\d+|[a-zA-Z]+)[、]|[(（](?:\d+|[a-zA-Z]+)[)）])\s+/;
 const LIST_CONTINUATION_PATTERN = /^\s{2,}\S/;
+const HEADING_REVIEW_START = "<!-- MD-FMT-HEADING-REVIEW:START -->";
+const HEADING_REVIEW_END = "<!-- MD-FMT-HEADING-REVIEW:END -->";
+const HEADING_REVIEW_META_START = "<!-- MD-FMT-HEADING-REVIEW-META";
 
 type BlockType = "heading" | "paragraph" | "list" | "math" | "code" | "thematicBreak" | "callout" | "image" | "table";
 
@@ -99,6 +102,27 @@ export type FormatStats = {
   insertedAfterLongParagraphByNextType: Record<BlockType, number>;
   paragraphDecisionSamples: string[];
   blankDecisionDetails: string[];
+};
+
+type HeadingReviewItem = {
+  id: string;
+  lineIndex: number;
+  original: string;
+  suggested: string;
+  flag: string;
+};
+
+export type HeadingReviewTableBuildResult = {
+  text: string;
+  itemCount: number;
+  replacedExisting: boolean;
+};
+
+export type HeadingReviewApplyResult = {
+  text: string;
+  hasReviewTable: boolean;
+  appliedCount: number;
+  skippedCount: number;
 };
 
 function createEmptyStats(): FormatStats {
@@ -197,6 +221,92 @@ function clampHeadingLevel(level: number): number {
   return level;
 }
 
+function parseArabicPrimary(text: string): number | null {
+  const match = text.match(ARABIC_DEPTH_PATTERN);
+  if (!match) return null;
+  const first = match[1].split(".")[0];
+  const value = Number(first);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  return value;
+}
+
+function parseChineseNumeral(text: string): number | null {
+  const digitMap: Record<string, number> = {
+    零: 0,
+    〇: 0,
+    一: 1,
+    二: 2,
+    两: 2,
+    三: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    七: 7,
+    八: 8,
+    九: 9,
+    壹: 1,
+    贰: 2,
+    叁: 3,
+    肆: 4,
+    伍: 5,
+    陆: 6,
+    柒: 7,
+    捌: 8,
+    玖: 9
+  };
+  const unitMap: Record<string, number> = { 十: 10, 拾: 10, 百: 100, 佰: 100, 千: 1000, 仟: 1000 };
+  let total = 0;
+  let current = 0;
+  for (const char of text) {
+    if (char in digitMap) {
+      current = digitMap[char];
+      continue;
+    }
+    if (char in unitMap) {
+      const unit = unitMap[char];
+      if (current === 0) current = 1;
+      total += current * unit;
+      current = 0;
+      continue;
+    }
+    return null;
+  }
+  total += current;
+  return total > 0 ? total : null;
+}
+
+function parseChineseHeadingPrefixNumber(text: string): number | null {
+  const match = text.match(/^\s*([零〇一二两三四五六七八九十百千壹贰叁肆伍陆柒捌玖拾佰仟]+)(?:[、.．:：)）]|\s)/);
+  if (!match) return null;
+  return parseChineseNumeral(match[1]);
+}
+
+function hasExplicitHeadingPrefix(text: string): boolean {
+  if (parseHeadingDepthByArabicNumber(text) !== null) return true;
+  if (parseChineseHeadingPrefixNumber(text) !== null) return true;
+  if (/^\s*\d+[.)、](?=\s)/.test(text)) return true;
+  if (/^\s*[A-Za-z][.)](?:\.)?(?=\s)/.test(text)) return true;
+  return false;
+}
+
+function stripChineseHeadingPrefix(text: string): string {
+  return text.replace(/^\s*[零〇一二两三四五六七八九十百千壹贰叁肆伍陆柒捌玖拾佰仟]+(?:[、.．:：)）]|\s)+/, "").trim();
+}
+
+function parseArabicHeadingPath(text: string): number[] | null {
+  const depth = parseHeadingDepthByArabicNumber(text);
+  if (depth === null) return null;
+  const match = text.match(/^\s*(\d+(?:\.\d+)*)/);
+  if (!match) return null;
+  const parts = match[1].split(".").map((part) => Number(part));
+  if (parts.length === 0 || parts.some((value) => !Number.isFinite(value) || value <= 0)) return null;
+  return parts;
+}
+
+function stripArabicHeadingPrefix(text: string): string {
+  return text.replace(/^\s*\d+(?:\.\d+)*(?:\.)?(?:\s+|$)/, "").trim();
+}
+
 function parseHeadingDepthByArabicNumber(text: string): number | null {
   if (/^\d+[.)、](?=\s)/.test(text)) return null;
   const match = text.match(ARABIC_DEPTH_PATTERN);
@@ -204,6 +314,78 @@ function parseHeadingDepthByArabicNumber(text: string): number | null {
   const nextChar = text.charAt(match[1].length);
   if (nextChar === ".") return null;
   return match[1].split(".").length;
+}
+
+function shouldIgnoreHashLineAsTagDefinition(line: string, hashes: string, text: string): boolean {
+  if (hashes.length !== 1) return false;
+  if (!/^\s{0,3}#(?:\s*\S)/.test(line)) return false;
+  if (hasChineseLabelWithEnglishTag(text)) return true;
+  return false;
+}
+
+function shouldRestoreHeadingAsTagDefinition(hashes: string, text: string): boolean {
+  if (hashes.length < 1) return false;
+  if (!hasChineseLabelWithEnglishTag(text)) return false;
+  return true;
+}
+
+function hasChineseLabelWithEnglishTag(text: string): boolean {
+  const englishTagMatch = text.match(/(?:^|[\s（(])(#([A-Za-z][\w-]*))/);
+  if (!englishTagMatch || englishTagMatch.index === undefined) return false;
+  const prefix = text.slice(0, englishTagMatch.index);
+  return /[\u4e00-\u9fff]/.test(prefix);
+}
+
+function matchHeadingLine(line: string): RegExpMatchArray | null {
+  const match = line.match(HEADING_PATTERN);
+  if (!match) return null;
+  if (shouldIgnoreHashLineAsTagDefinition(line, match[1], match[2])) return null;
+  return match;
+}
+
+function normalizeIgnoredTagDefinitionLine(line: string): string | null {
+  const match = line.match(HEADING_PATTERN);
+  if (!match) return null;
+  if (!shouldIgnoreHashLineAsTagDefinition(line, match[1], match[2])) return null;
+  return `#${match[2].trimStart()}`;
+}
+
+function normalizeTagDefinitionLines(markdown: string): string {
+  const sourceLines = markdown.split(/\r?\n/);
+  const outputLines: string[] = [];
+  let inCodeFence = false;
+  for (const rawLine of sourceLines) {
+    const trimmed = rawLine.trim();
+    if (FENCE_PATTERN.test(trimmed)) {
+      inCodeFence = !inCodeFence;
+      outputLines.push(rawLine);
+      continue;
+    }
+    if (inCodeFence) {
+      outputLines.push(rawLine);
+      continue;
+    }
+    const normalizedIgnoredLine = normalizeIgnoredTagDefinitionLine(rawLine);
+    if (normalizedIgnoredLine) {
+      outputLines.push(normalizedIgnoredLine);
+      continue;
+    }
+    const headingMatch = rawLine.match(HEADING_PATTERN);
+    if (!headingMatch || !shouldRestoreHeadingAsTagDefinition(headingMatch[1], headingMatch[2])) {
+      outputLines.push(rawLine);
+      continue;
+    }
+    let restoredText = headingMatch[2].trimStart();
+    if (parseArabicHeadingPath(restoredText) !== null) {
+      const stripped = stripArabicHeadingPrefix(restoredText);
+      if (stripped.length > 0) restoredText = stripped;
+    } else if (parseChineseHeadingPrefixNumber(restoredText) !== null) {
+      const stripped = stripChineseHeadingPrefix(restoredText);
+      if (stripped.length > 0) restoredText = stripped;
+    }
+    outputLines.push(`#${restoredText}`);
+  }
+  return outputLines.join("\n");
 }
 
 function normalizeHeadingSemanticText(text: string): string {
@@ -440,41 +622,103 @@ function normalizeHeadingLine(
   line: string,
   previousHeadingLevel: number | null,
   latestNumberedHeadingLevel: number | null,
-  latestSecondLevelNumberedHeadingLevel: number | null
-): { line: string; level: number; isNumbered: boolean; arabicDepth: number | null } {
-  const match = line.match(HEADING_PATTERN);
+  latestSecondLevelNumberedHeadingLevel: number | null,
+  nextArabicPrimary: number | null
+): {
+  level: number;
+  isNumbered: boolean;
+  arabicDepth: number | null;
+  rawText: string;
+  sourceLevel: number;
+  chinesePrefixNumber: number | null;
+  inferredParentByChinese: boolean;
+} {
+  const match = matchHeadingLine(line);
   if (!match) {
-    return { line, level: previousHeadingLevel ?? 1, isNumbered: false, arabicDepth: null };
+    return {
+      level: previousHeadingLevel ?? 1,
+      isNumbered: false,
+      arabicDepth: null,
+      rawText: line,
+      sourceLevel: 1,
+      chinesePrefixNumber: null,
+      inferredParentByChinese: false
+    };
   }
 
   const rawText = match[2].trim();
   const currentLevel = clampHeadingLevel(match[1].length);
   const arabicDepth = parseHeadingDepthByArabicNumber(rawText);
+  const chinesePrefixNumber = parseChineseHeadingPrefixNumber(rawText);
+  const inferredParentByChinese =
+    arabicDepth === null &&
+    chinesePrefixNumber !== null &&
+    nextArabicPrimary !== null &&
+    chinesePrefixNumber === nextArabicPrimary;
   const isSpecialSection = arabicDepth === null && latestSecondLevelNumberedHeadingLevel === 2 && isSpecialSectionHeading(rawText);
+  const effectiveArabicDepth = arabicDepth ?? (inferredParentByChinese ? 1 : null);
   const normalizedLevel =
     isSpecialSection
       ? 3
+      : inferredParentByChinese
+      ? 1
       : arabicDepth !== null
       ? clampHeadingLevel(arabicDepth)
       : clampHeadingLevel((latestNumberedHeadingLevel ?? previousHeadingLevel ?? currentLevel - 1) + 1);
 
   return {
-    line: `${"#".repeat(normalizedLevel)} ${rawText}`,
     level: normalizedLevel,
-    isNumbered: arabicDepth !== null,
-    arabicDepth
+    isNumbered: effectiveArabicDepth !== null,
+    arabicDepth: effectiveArabicDepth,
+    rawText,
+    sourceLevel: currentLevel,
+    chinesePrefixNumber,
+    inferredParentByChinese
   };
 }
 
 function normalizeHeadingLevels(markdown: string, stats: FormatStats): string {
   const sourceLines = markdown.split(/\r?\n/);
+  const nextArabicPrimaryByLineIndex = new Map<number, number | null>();
+  {
+    const headingMeta: Array<{ lineIndex: number; arabicDepth: number | null; arabicPrimary: number | null }> = [];
+    let scanInCodeFence = false;
+    for (let lineIndex = 0; lineIndex < sourceLines.length; lineIndex += 1) {
+      const line = sourceLines[lineIndex];
+      const trimmed = line.trim();
+      if (FENCE_PATTERN.test(trimmed)) {
+        scanInCodeFence = !scanInCodeFence;
+        continue;
+      }
+      if (scanInCodeFence) continue;
+      const headingMatch = matchHeadingLine(line);
+      if (!headingMatch) continue;
+      const rawText = headingMatch[2].trim();
+      headingMeta.push({
+        lineIndex,
+        arabicDepth: parseHeadingDepthByArabicNumber(rawText),
+        arabicPrimary: parseArabicPrimary(rawText)
+      });
+    }
+    let nextPrimary: number | null = null;
+    for (let index = headingMeta.length - 1; index >= 0; index -= 1) {
+      const item = headingMeta[index];
+      nextArabicPrimaryByLineIndex.set(item.lineIndex, nextPrimary);
+      if (item.arabicDepth !== null && item.arabicDepth >= 2 && item.arabicPrimary !== null) {
+        nextPrimary = item.arabicPrimary;
+      }
+    }
+  }
   const outputLines: string[] = [];
   let inCodeFence = false;
   let previousHeadingLevel: number | null = null;
   let latestNumberedHeadingLevel: number | null = null;
   let latestSecondLevelNumberedHeadingLevel: number | null = null;
+  const numberedPathByLevel = new Map<number, number[]>();
+  const syntheticSiblingCounterByParentPath = new Map<string, number>();
 
-  for (const rawLine of sourceLines) {
+  for (let lineIndex = 0; lineIndex < sourceLines.length; lineIndex += 1) {
+    const rawLine = sourceLines[lineIndex];
     if (FENCE_PATTERN.test(rawLine)) {
       inCodeFence = !inCodeFence;
       outputLines.push(rawLine);
@@ -486,8 +730,16 @@ function normalizeHeadingLevels(markdown: string, stats: FormatStats): string {
       continue;
     }
 
-    const headingMatch = rawLine.match(HEADING_PATTERN);
+    const headingMatch = matchHeadingLine(rawLine);
     if (!headingMatch) {
+      const normalizedIgnoredTagLine = normalizeIgnoredTagDefinitionLine(rawLine);
+      if (normalizedIgnoredTagLine) {
+        if (normalizedIgnoredTagLine !== rawLine) {
+          stats.headingAdjustedCount += 1;
+        }
+        outputLines.push(normalizedIgnoredTagLine);
+        continue;
+      }
       outputLines.push(rawLine);
       continue;
     }
@@ -496,10 +748,51 @@ function normalizeHeadingLevels(markdown: string, stats: FormatStats): string {
       rawLine,
       previousHeadingLevel,
       latestNumberedHeadingLevel,
-      latestSecondLevelNumberedHeadingLevel
+      latestSecondLevelNumberedHeadingLevel,
+      nextArabicPrimaryByLineIndex.get(lineIndex) ?? null
     );
-    if (normalized.line !== rawLine) {
+    const explicitArabicPath = parseArabicHeadingPath(normalized.rawText);
+    let outputPath: number[] | null = explicitArabicPath;
+    let outputBody = normalized.rawText;
+    if (normalized.chinesePrefixNumber !== null) {
+      const chineseBody = stripChineseHeadingPrefix(outputBody);
+      outputBody = `${normalized.chinesePrefixNumber} ${chineseBody.length > 0 ? chineseBody : normalized.rawText}`.trim();
+      outputPath = [normalized.chinesePrefixNumber];
+    } else if (outputPath === null && normalized.level > 1 && !hasExplicitHeadingPrefix(normalized.rawText)) {
+      const parentPath = numberedPathByLevel.get(normalized.level - 1);
+      const isTopOrAlignedLevel = normalized.sourceLevel === 1 || normalized.sourceLevel === normalized.level;
+      const shouldAutoNumberUnnumbered = Boolean(parentPath && parentPath.length >= 2 && isTopOrAlignedLevel);
+      if (parentPath && shouldAutoNumberUnnumbered) {
+        const counterKey = `${parentPath.join(".")}->${normalized.level}`;
+        const nextCounter = (syntheticSiblingCounterByParentPath.get(counterKey) ?? 0) + 1;
+        syntheticSiblingCounterByParentPath.set(counterKey, nextCounter);
+        outputPath = [...parentPath, nextCounter];
+        const stripped = stripArabicHeadingPrefix(outputBody);
+        outputBody = stripped.length > 0 ? stripped : outputBody;
+      }
+    }
+    if (outputPath !== null) {
+      let suffix = "";
+      if (normalized.chinesePrefixNumber !== null) {
+        suffix = stripChineseHeadingPrefix(normalized.rawText);
+      } else if (explicitArabicPath !== null) {
+        suffix = stripArabicHeadingPrefix(normalized.rawText);
+      } else {
+        suffix = stripArabicHeadingPrefix(outputBody);
+      }
+      outputBody = suffix.length > 0 ? `${outputPath.join(".")} ${suffix}` : outputPath.join(".");
+    }
+    const normalizedLine = `${"#".repeat(normalized.level)} ${outputBody}`;
+    if (normalizedLine !== rawLine) {
       stats.headingAdjustedCount += 1;
+    }
+    for (const level of Array.from(numberedPathByLevel.keys())) {
+      if (level > normalized.level) numberedPathByLevel.delete(level);
+    }
+    if (outputPath !== null) {
+      numberedPathByLevel.set(normalized.level, outputPath);
+    } else {
+      numberedPathByLevel.delete(normalized.level);
     }
     previousHeadingLevel = normalized.level;
     if (normalized.isNumbered) {
@@ -510,7 +803,7 @@ function normalizeHeadingLevels(markdown: string, stats: FormatStats): string {
         latestSecondLevelNumberedHeadingLevel = 2;
       }
     }
-    outputLines.push(normalized.line);
+    outputLines.push(normalizedLine);
   }
 
   return outputLines.join("\n");
@@ -591,7 +884,7 @@ function normalizeBlankLines(markdown: string, stats: FormatStats): string {
       continue;
     }
 
-    if (HEADING_PATTERN.test(trimmed)) {
+    if (matchHeadingLine(trimmed)) {
       blocks.push({
         type: "heading",
         lines: [trimmed],
@@ -735,7 +1028,7 @@ function normalizeBlankLines(markdown: string, stats: FormatStats): string {
         FENCE_PATTERN.test(nextTrimmed) ||
         MATH_BLOCK_PATTERN.test(nextTrimmed) ||
         MATH_BLOCK_START_PATTERN.test(nextTrimmed) ||
-        HEADING_PATTERN.test(nextTrimmed) ||
+        Boolean(matchHeadingLine(nextTrimmed)) ||
         THEMATIC_BREAK_PATTERN.test(nextTrimmed) ||
         CALLOUT_LINE_PATTERN.test(nextTrimmed) ||
         MARKDOWN_IMAGE_PATTERN.test(nextTrimmed) ||
@@ -1002,7 +1295,8 @@ export function formatMarkdownWithStats(
   const shouldNormalizeHeadings = options?.normalizeHeadings !== false;
   const stats = createEmptyStats();
   const headingNormalized = shouldNormalizeHeadings ? normalizeHeadingLevels(markdown, stats) : markdown;
-  const listMarkerNormalized = normalizeUnorderedListMarkers(headingNormalized, stats);
+  const tagDefinitionNormalized = normalizeTagDefinitionLines(headingNormalized);
+  const listMarkerNormalized = normalizeUnorderedListMarkers(tagDefinitionNormalized, stats);
   const mathDelimiterNormalized = normalizeMathBlockDelimiterIndent(listMarkerNormalized);
   const blankNormalized = normalizeBlankLines(mathDelimiterNormalized, stats);
   const text = normalizeImageCalloutGap(blankNormalized);
@@ -1011,4 +1305,172 @@ export function formatMarkdownWithStats(
 
 export function formatMarkdownContentOnlyWithStats(markdown: string): { text: string; stats: FormatStats } {
   return formatMarkdownWithStats(markdown, { normalizeHeadings: false });
+}
+
+function extractHeadingLines(markdown: string): Array<{ lineIndex: number; line: string }> {
+  const lines = markdown.split(/\r?\n/);
+  const result: Array<{ lineIndex: number; line: string }> = [];
+  let inCodeFence = false;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const trimmed = line.trim();
+    if (FENCE_PATTERN.test(trimmed)) {
+      inCodeFence = !inCodeFence;
+      continue;
+    }
+    if (inCodeFence) continue;
+    if (!matchHeadingLine(trimmed)) continue;
+    const normalized = trimmed.replace(/^(\s{0,3}#{1,6})\s*/, "$1 ");
+    result.push({ lineIndex: index, line: normalized });
+  }
+  return result;
+}
+
+function findHeadingReviewBlock(markdown: string): { start: number; end: number; block: string } | null {
+  const start = markdown.indexOf(HEADING_REVIEW_START);
+  if (start < 0) return null;
+  const endMarkerStart = markdown.indexOf(HEADING_REVIEW_END, start);
+  if (endMarkerStart < 0) return null;
+  const end = endMarkerStart + HEADING_REVIEW_END.length;
+  return { start, end, block: markdown.slice(start, end) };
+}
+
+function stripHeadingReviewBlock(markdown: string): { body: string; block: string | null; replacedExisting: boolean } {
+  const found = findHeadingReviewBlock(markdown);
+  if (!found) return { body: markdown, block: null, replacedExisting: false };
+  const before = markdown.slice(0, found.start).replace(/[ \t]*\n?$/, "");
+  const after = markdown.slice(found.end).replace(/^\n+/, "");
+  const body = [before, after].filter((part) => part.length > 0).join("\n\n");
+  return { body, block: found.block, replacedExisting: true };
+}
+
+function escapeTableCell(text: string): string {
+  return text.replace(/\|/g, "\\|").replace(/\n/g, " ");
+}
+
+function classifyHeadingFlag(original: string, suggested: string): string {
+  const originalLevel = (original.match(/^#{1,6}/)?.[0].length ?? 0);
+  const suggestedLevel = (suggested.match(/^#{1,6}/)?.[0].length ?? 0);
+  const originalBody = original.replace(/^#{1,6}\s*/, "");
+  const suggestedBody = suggested.replace(/^#{1,6}\s*/, "");
+  if (!matchHeadingLine(suggested) && /#[A-Za-z][\w-]*/.test(suggested)) {
+    return "恢复术语定义行";
+  }
+  const tags: string[] = [];
+  if (originalLevel !== suggestedLevel) tags.push(`H${originalLevel}→H${suggestedLevel}`);
+  if (originalBody !== suggestedBody) tags.push("编号/文本调整");
+  if (!/^\d+(?:\.\d+)*\.?\s+/.test(originalBody)) tags.push("原始非标准编号");
+  if (tags.length === 0) return "保持";
+  return tags.join("、");
+}
+
+function parseHeadingReviewMeta(block: string): HeadingReviewItem[] {
+  const metaPattern = new RegExp(`${HEADING_REVIEW_META_START}\\s*\\n([\\s\\S]*?)\\n-->`);
+  const match = block.match(metaPattern);
+  if (!match) return [];
+  try {
+    const parsed = JSON.parse(match[1]) as { items?: HeadingReviewItem[] };
+    if (!parsed.items || !Array.isArray(parsed.items)) return [];
+    return parsed.items;
+  } catch {
+    return [];
+  }
+}
+
+function parseEditableHeadingRows(block: string): string[] {
+  const lines = block.split(/\r?\n/);
+  const rows = lines.filter((line) => /^\|/.test(line.trim()));
+  if (rows.length <= 2) return [];
+  const dataRows = rows.slice(2);
+  const editable: string[] = [];
+  for (const row of dataRows) {
+    const content = row.trim();
+    if (content.length === 0) continue;
+    const cells = content.slice(1, content.endsWith("|") ? -1 : undefined).split("|").map((cell) => cell.trim());
+    if (cells.length < 2) continue;
+    editable.push(cells[1].replace(/\\\|/g, "|").trim());
+  }
+  return editable;
+}
+
+function buildHeadingReviewBlock(body: string): { block: string; itemCount: number } {
+  const headingOnlyFormatted = normalizeTagDefinitionLines(normalizeHeadingLevels(body, createEmptyStats()));
+  const sourceHeadings = extractHeadingLines(body);
+  const headingOnlyLines = headingOnlyFormatted.split(/\r?\n/);
+  const items: HeadingReviewItem[] = [];
+  for (let index = 0; index < sourceHeadings.length; index += 1) {
+    const source = sourceHeadings[index];
+    const suggestedRaw = headingOnlyLines[source.lineIndex] ?? source.line;
+    const suggested = matchHeadingLine(suggestedRaw)
+      ? suggestedRaw.replace(/^(\s{0,3}#{1,6})\s*/, "$1 ")
+      : suggestedRaw.trim();
+    const id = `H${String(index + 1).padStart(4, "0")}`;
+    const flag = classifyHeadingFlag(source.line, suggested);
+    items.push({
+      id,
+      lineIndex: source.lineIndex,
+      original: source.line,
+      suggested,
+      flag
+    });
+  }
+  const meta = JSON.stringify({ items });
+  const tableLines = [
+    "## 标题快修表",
+    "",
+    "| 原标题 | 快修标题（可编辑） | 标记 |",
+    "| --- | --- | --- |",
+    ...items.map((item) => `| ${escapeTableCell(item.original)} | ${escapeTableCell(item.suggested)} | ${item.flag} |`)
+  ];
+  const block = [
+    HEADING_REVIEW_START,
+    HEADING_REVIEW_META_START,
+    meta,
+    "-->",
+    ...tableLines,
+    HEADING_REVIEW_END
+  ].join("\n");
+  return { block, itemCount: items.length };
+}
+
+export function buildHeadingReviewTable(markdown: string): HeadingReviewTableBuildResult {
+  const stripped = stripHeadingReviewBlock(markdown);
+  const body = stripped.body.trimEnd();
+  const built = buildHeadingReviewBlock(body);
+  const text = `${body}\n\n${built.block}\n`;
+  return { text, itemCount: built.itemCount, replacedExisting: stripped.replacedExisting };
+}
+
+export function applyHeadingReviewTable(markdown: string): HeadingReviewApplyResult {
+  const stripped = stripHeadingReviewBlock(markdown);
+  if (!stripped.block) {
+    return { text: markdown, hasReviewTable: false, appliedCount: 0, skippedCount: 0 };
+  }
+  const items = parseHeadingReviewMeta(stripped.block);
+  const editedHeadings = parseEditableHeadingRows(stripped.block);
+  const bodyLines = stripped.body.split(/\r?\n/);
+  let appliedCount = 0;
+  let skippedCount = 0;
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    const edited = (editedHeadings[index] ?? item.suggested).trim();
+    if (edited.length === 0) {
+      skippedCount += 1;
+      continue;
+    }
+    if (item.lineIndex < 0 || item.lineIndex >= bodyLines.length) {
+      skippedCount += 1;
+      continue;
+    }
+    bodyLines[item.lineIndex] = edited;
+    appliedCount += 1;
+  }
+  const rewrittenBody = formatMarkdownWithStats(bodyLines.join("\n"), { normalizeHeadings: false }).text;
+  const rebuilt = buildHeadingReviewTable(rewrittenBody);
+  return {
+    text: rebuilt.text,
+    hasReviewTable: true,
+    appliedCount,
+    skippedCount
+  };
 }

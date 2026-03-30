@@ -1,5 +1,10 @@
 import { MarkdownView, Notice, Platform, Plugin } from "obsidian";
-import { formatMarkdownContentOnlyWithStats, formatMarkdownWithStats } from "./formatter";
+import {
+  applyHeadingReviewTable,
+  buildHeadingReviewTable,
+  formatMarkdownContentOnlyWithStats,
+  formatMarkdownWithStats
+} from "./formatter";
 
 type ImageSizingMetrics = {
   noImageRootSkipCount: number;
@@ -41,6 +46,20 @@ export default class MdContentFormattingPlugin extends Plugin {
       name: "Format current note (content only)",
       callback: () => {
         this.formatCurrentNoteContentOnly();
+      }
+    });
+    this.addCommand({
+      id: "heading-review-table-generate",
+      name: "Generate/refresh heading review table",
+      callback: () => {
+        this.generateHeadingReviewTable();
+      }
+    });
+    this.addCommand({
+      id: "heading-review-table-apply",
+      name: "Apply heading review table to headings",
+      callback: () => {
+        this.applyHeadingReviewTableToNote();
       }
     });
 
@@ -85,6 +104,40 @@ export default class MdContentFormattingPlugin extends Plugin {
 
   private formatCurrentNoteContentOnly(): void {
     this.formatCurrentNoteInternal("content-only");
+  }
+
+  private generateHeadingReviewTable(): void {
+    const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!markdownView) {
+      new Notice("No active markdown file.");
+      return;
+    }
+    const editor = markdownView.editor;
+    const source = editor.getValue();
+    const result = buildHeadingReviewTable(source);
+    editor.setValue(result.text);
+    new Notice(
+      result.replacedExisting
+        ? `Heading review table refreshed (${result.itemCount} headings).`
+        : `Heading review table generated (${result.itemCount} headings).`
+    );
+  }
+
+  private applyHeadingReviewTableToNote(): void {
+    const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!markdownView) {
+      new Notice("No active markdown file.");
+      return;
+    }
+    const editor = markdownView.editor;
+    const source = editor.getValue();
+    const result = applyHeadingReviewTable(source);
+    if (!result.hasReviewTable) {
+      new Notice("No heading review table found.");
+      return;
+    }
+    editor.setValue(result.text);
+    new Notice(`Heading review applied (${result.appliedCount} updated, ${result.skippedCount} skipped).`);
   }
 
   private formatCurrentNoteInternal(mode: "full" | "content-only"): void {
