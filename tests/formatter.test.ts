@@ -6,8 +6,145 @@ import {
   formatMarkdownContentOnly,
   formatMarkdownWithStats
 } from "../src/formatter";
+import {
+  getHeadingMarkerStrength,
+  hasExplicitHeadingPrefix,
+  parseArabicHeadingPath,
+  parseChineseHeadingPrefixNumber,
+  parseHeadingMarker,
+  parseHeadingDepthByArabicNumber,
+  parseSingleNumericHeadingPrefix
+} from "../src/headingNormalizationShared";
+
+type HeadingMatrixCase = {
+  name: string;
+  input: string[];
+  expected: string[];
+};
+
+type HeadingMatrixGroup = {
+  category: string;
+  cases: HeadingMatrixCase[];
+};
+
+type HeadingMarkerCase = {
+  label: string;
+  text: string;
+  kind: string;
+  strength: string;
+  depth: number | null;
+  numericPath: number[] | null;
+  numericValue: number | null;
+  alphaValue: string | null;
+};
 
 describe("formatMarkdown", () => {
+  const headingMatrixGroups: HeadingMatrixGroup[] = [
+    {
+      category: "章节锚点",
+      cases: [
+        {
+          name: "顶层单段数字章节在深层子节之后仍保持 H1",
+          input: ["## 30.3 上一节", "# 31 下一章", "## 31.1 第一节"],
+          expected: ["## 30.3 上一节", "", "# 31 下一章", "", "## 31.1 第一节"]
+        },
+        {
+          name: "带句点的顶层数字章节不会被 special-section 语义误降级",
+          input: ["# 30 关键结论和知识点总结", "## 30.1 核心公式", "## 30.2 核心思想", "# 31. 学习主线回顾"],
+          expected: ["# 30 关键结论和知识点总结", "", "## 30.1 核心公式", "", "## 30.2 核心思想", "", "# 31 学习主线回顾"]
+        },
+        {
+          name: "纯文本 H1 在编号子节后仍保持顶层章节",
+          input: ["# 30 关键结论和知识点总结", "## 30.1 核心公式", "# 学习主线回顾"],
+          expected: ["# 30 关键结论和知识点总结", "", "## 30.1 核心公式", "", "# 学习主线回顾"]
+        },
+        {
+          name: "顶层章节锚点下的无编号子标题会自动补成章节内顺序编号",
+          input: ["# 7 从二次势能到高斯分布", "### 前置知识", "### 核心结论"],
+          expected: ["# 7 从二次势能到高斯分布", "", "## 7.1 前置知识", "", "## 7.2 核心结论"]
+        }
+      ]
+    },
+    {
+      category: "跨位数章节",
+      cases: [
+        {
+          name: "跨十位数章节切换时不会把 10 误挂到 9.9 之下",
+          input: ["## 9.9 最后一小节", "# 10 下一章", "## 10.1 第一节"],
+          expected: ["## 9.9 最后一小节", "", "# 10 下一章", "", "## 10.1 第一节"]
+        },
+        {
+          name: "带句点的顶层章节锚点在跨十位数时仍保持顶层",
+          input: ["## 30.9 最后一小节", "# 31. 下一章", "## 31.1 第一节"],
+          expected: ["## 30.9 最后一小节", "", "# 31 下一章", "", "## 31.1 第一节"]
+        },
+        {
+          name: "跨百位数章节切换时不会把 100 误挂到 99.9 之下",
+          input: ["## 99.9 最后一小节", "# 100. 下一章", "## 100.1 第一节"],
+          expected: ["## 99.9 最后一小节", "", "# 100 下一章", "", "## 100.1 第一节"]
+        }
+      ]
+    },
+    {
+      category: "语义特例与混排",
+      cases: [
+        {
+          name: "编号小节内部的特殊语义标题仍收敛为摘要小节",
+          input: ["## 30.3 核心关系", "#### 学习主线回顾", "#### 容易混淆的点"],
+          expected: ["## 30.3 核心关系", "", "### 学习主线回顾", "", "### 容易混淆的点"]
+        },
+        {
+          name: "中文序号章节锚点与后续阿拉伯编号家族能够正确对齐",
+          input: ["#### 五、第三族：距离依赖曲线", "### 5.1 双曲线", "## 5.1.1 子节"],
+          expected: ["# 5 第三族：距离依赖曲线", "", "## 5.1 双曲线", "", "### 5.1.1 子节"]
+        },
+        {
+          name: "中文章节、阿拉伯子节、字母小点与无编号说明混排时保持家族边界",
+          input: ["#### 五、总论", "### 5.1 背景", "##### a. 现象", "###### 无编号补充", "##### b) 解释"],
+          expected: ["# 5 总论", "", "## 5.1 背景", "", "### a. 现象", "", "### 无编号补充", "", "### b) 解释"]
+        },
+        {
+          name: "字母小点之后恢复阿拉伯路径时不会丢失编号家族上下文",
+          input: ["# 3 章节", "## 3.1 概览", "### a. 字母小点", "#### 3.1.1 恢复阿拉伯子节", "##### 无编号补充"],
+          expected: ["# 3 章节", "", "## 3.1 概览", "", "### a. 字母小点", "", "### 3.1.1 恢复阿拉伯子节", "", "#### 3.1.1.1 无编号补充"]
+        },
+        {
+          name: "字母序列小点会按 sibling 顺序自动收敛为连续 A/B/C",
+          input: ["## 5.1 小节", "### A. 第一步", "### C. 跳号第三步", "### D) 第四步"],
+          expected: ["## 5.1 小节", "", "### A. 第一步", "", "### B. 跳号第三步", "", "### C) 第四步"]
+        },
+        {
+          name: "小写字母序列允许普通标题继续向下结构化扩展",
+          input: ["## 5.1 小节", "### a) 第一步", "#### 无编号说明", "### c. 第三步"],
+          expected: ["## 5.1 小节", "", "### a) 第一步", "", "#### 无编号说明", "", "### b. 第三步"]
+        },
+        {
+          name: "中文到 alpha 再回到阿拉伯时字母序列与后续路径都保持稳定",
+          input: ["#### 五、总论", "##### A. 观察", "##### C. 解释", "###### 5.1 回到阿拉伯", "###### 无编号补充"],
+          expected: ["# 5 总论", "", "## A. 观察", "", "## B. 解释", "", "## 5.1 回到阿拉伯", "", "### 5.1.1 无编号补充"]
+        },
+        {
+          name: "中文锚点下的 upper-alpha 与 lower-alpha 可形成稳定的两层结构扩展",
+          input: ["#### 五、总论", "### 5.1 基线", "##### A. 一级观察", "###### a) 次级现象"],
+          expected: ["# 5 总论", "", "## 5.1 基线", "", "### A. 一级观察", "", "#### a) 次级现象"]
+        },
+        {
+          name: "alpha 复合路径 A.1 / A.1.1 与无编号总结可形成稳定结构",
+          input: ["# 总论", "### A.1 一级主题", "##### A.1.1 二级主题", "###### 无编号总结"],
+          expected: ["# 总论", "", "## A.1 一级主题", "", "### A.1.1 二级主题", "", "#### A.1.1.1 无编号总结"]
+        }
+      ]
+    }
+  ];
+
+  const headingMatrixCases = headingMatrixGroups.flatMap((group) =>
+    group.cases.map((testCase) => ({ ...testCase, category: group.category }))
+  );
+
+  it.each(headingMatrixCases)("keeps heading normalization matrix invariant [$category]: $name", ({ input, expected }) => {
+    expect(formatMarkdown(input.join("\n"))).toBe(expected.join("\n"));
+  });
+
   it("fixes heading levels by arabic numbering depth", () => {
     const input = ["# 4", "## 4.1", "###4.1.1", "## 4.1.1.1", "# 4.1.1.1.1"].join("\n");
     const output = formatMarkdown(input);
@@ -320,6 +457,71 @@ describe("formatMarkdown", () => {
         "## 4.1 Taylor 展开的基本思想"
       ].join("\n")
     );
+  });
+
+  it("keeps # 31 as a new top-level chapter after ## 30.3 instead of nesting it under 30.3", () => {
+    const input = ["## 30.3 上一节", "# 31 下一章", "## 31.1 第一节"].join("\n");
+    const output = formatMarkdown(input);
+
+    expect(output).toBe(["## 30.3 上一节", "", "# 31 下一章", "", "## 31.1 第一节"].join("\n"));
+  });
+
+  it("does not downgrade numbered top-level special-section titles after 30.x subsections", () => {
+    const input = [
+      "# 30 关键结论和知识点总结",
+      "## 30.1 核心公式",
+      "## 30.2 核心思想",
+      "## 30.3 核心关系",
+      "# 31. 学习主线回顾",
+      "# 32 容易混淆的点",
+      "# 33 专业术语/关键词中英文对照并标注 tag",
+      "# 34 附录：标准高斯积分为什么等于 $\\sqrt{2\\pi}$"
+    ].join("\n");
+    const output = formatMarkdown(input);
+
+    expect(output).toBe(
+      [
+        "# 30 关键结论和知识点总结",
+        "",
+        "## 30.1 核心公式",
+        "",
+        "## 30.2 核心思想",
+        "",
+        "## 30.3 核心关系",
+        "",
+        "# 31 学习主线回顾",
+        "",
+        "# 32 容易混淆的点",
+        "",
+        "# 33 专业术语/关键词中英文对照并标注 tag",
+        "",
+        "# 34 附录：标准高斯积分为什么等于 $\\sqrt{2\\pi}$"
+      ].join("\n")
+    );
+  });
+
+  it("still keeps non-numbered special-section headings as internal summaries under numbered subsections", () => {
+    const input = ["## 30.3 核心关系", "#### 学习主线回顾", "#### 容易混淆的点", "#### 专业术语/关键词中英文对照并标注 tag"].join("\n");
+    const output = formatMarkdown(input);
+
+    expect(output).toBe(
+      [
+        "## 30.3 核心关系",
+        "",
+        "### 学习主线回顾",
+        "",
+        "### 容易混淆的点",
+        "",
+        "### 专业术语/关键词中英文对照并标注 tag"
+      ].join("\n")
+    );
+  });
+
+  it("keeps plain h1 headings as new top-level sections even after numbered subsections", () => {
+    const input = ["# 30 关键结论和知识点总结", "## 30.1 核心公式", "## 30.2 核心思想", "# 学习主线回顾"].join("\n");
+    const output = formatMarkdown(input);
+
+    expect(output).toBe(["# 30 关键结论和知识点总结", "", "## 30.1 核心公式", "", "## 30.2 核心思想", "", "# 学习主线回顾"].join("\n"));
   });
 
   it("removes redundant blank lines and keeps one blank line before heading when previous line is content", () => {
@@ -746,11 +948,74 @@ describe("formatMarkdown", () => {
     expect(output).toBe("Why does light appear to travel at a speed other than $c$ when photons can exist only at $c$?");
   });
 
-  it("keeps one blank line before table header row", () => {
+  it("keeps one blank line before table header row for android live preview parsing", () => {
     const input = ["正文内容", "| 列1 | 列2 |", "| --- | --- |", "| A | B |"].join("\n");
     const output = formatMarkdown(input);
 
     expect(output).toBe(["正文内容", "", "| 列1 | 列2 |", "| --- | --- |", "| A | B |"].join("\n"));
+  });
+
+  it("inserts one blank line before table when previous text ends with colon for android live preview parsing", () => {
+    const input = ["如下：", "| 列1 | 列2 |", "| --- | --- |", "| A | B |"].join("\n");
+    const output = formatMarkdown(input);
+
+    expect(output).toBe(["如下：", "", "| 列1 | 列2 |", "| --- | --- |", "| A | B |"].join("\n"));
+  });
+
+  it("inserts one blank line before table when separator row uses alignment syntax for android live preview parsing", () => {
+    const input = ["如下：", "| 列1 | 列2 |", "| :-- | :-- |", "| A | B |"].join("\n");
+    const output = formatMarkdown(input);
+
+    expect(output).toBe(["如下：", "", "| 列1 | 列2 |", "| :-- | :-- |", "| A | B |"].join("\n"));
+  });
+
+  it("keeps exactly one blank line before table and normal spacing after table for android live preview", () => {
+    const input = ["上一段正文", "", "", "| 列1 | 列2 |", "| --- | --- |", "| A | B |", "", "", "下一段正文"].join("\n");
+    const output = formatMarkdown(input);
+
+    expect(output).toBe(["上一段正文", "", "| 列1 | 列2 |", "| --- | --- |", "| A | B |", "下一段正文"].join("\n"));
+  });
+
+  it("keeps exactly one blank line before table after heading for android live preview", () => {
+    const input = ["# 标题", "| 列1 | 列2 |", "| --- | --- |", "| A | B |", "下一段正文"].join("\n");
+    const output = formatMarkdown(input);
+
+    expect(output).toBe(["# 标题", "", "| 列1 | 列2 |", "| --- | --- |", "| A | B |", "下一段正文"].join("\n"));
+  });
+
+  it("keeps exactly one blank line before table after list for android live preview", () => {
+    const input = ["- 要点A", "- 要点B", "| 列1 | 列2 |", "| --- | --- |", "| A | B |", "下一段正文"].join("\n");
+    const output = formatMarkdown(input);
+
+    expect(output).toBe(["- 要点A", "- 要点B", "", "| 列1 | 列2 |", "| --- | --- |", "| A | B |", "下一段正文"].join("\n"));
+  });
+
+  it("keeps exactly one blank line before table after callout for android live preview", () => {
+    const input = ["> [!note]", "> 说明内容", "| 列1 | 列2 |", "| --- | --- |", "| A | B |", "下一段正文"].join("\n");
+    const output = formatMarkdown(input);
+
+    expect(output).toBe(["> [!note]", "> 说明内容", "", "| 列1 | 列2 |", "| --- | --- |", "| A | B |", "下一段正文"].join("\n"));
+  });
+
+  it("keeps normal spacing when heading follows table", () => {
+    const input = ["正文内容", "| 列1 | 列2 |", "| --- | --- |", "| A | B |", "## 后续标题", "下一段正文"].join("\n");
+    const output = formatMarkdown(input);
+
+    expect(output).toBe(["正文内容", "", "| 列1 | 列2 |", "| --- | --- |", "| A | B |", "", "## 后续标题", "", "下一段正文"].join("\n"));
+  });
+
+  it("keeps normal spacing when list follows table", () => {
+    const input = ["正文内容", "| 列1 | 列2 |", "| --- | --- |", "| A | B |", "- 要点A", "- 要点B", "后续正文"].join("\n");
+    const output = formatMarkdown(input);
+
+    expect(output).toBe(["正文内容", "", "| 列1 | 列2 |", "| --- | --- |", "| A | B |", "- 要点A", "- 要点B", "", "后续正文"].join("\n"));
+  });
+
+  it("keeps normal spacing when callout follows table", () => {
+    const input = ["正文内容", "| 列1 | 列2 |", "| --- | --- |", "| A | B |", "> [!tip]", "> 后续说明", "下一段正文"].join("\n");
+    const output = formatMarkdown(input);
+
+    expect(output).toBe(["正文内容", "", "| 列1 | 列2 |", "| --- | --- |", "| A | B |", "> [!tip]", "> 后续说明", "", "下一段正文"].join("\n"));
   });
 
   it("moves $$ to line start by removing leading spaces", () => {
@@ -825,10 +1090,68 @@ describe("formatMarkdown", () => {
     const built = buildHeadingReviewTable(input);
     const edited = built.text.replace("| 　　↳ ### 1.1 错层 | 　↳ ## 1.1 错层 |", "| 　　↳ ### 1.1 错层 | 　↳ ## 1.1 改后标题 |");
     const applied = applyHeadingReviewTable(edited);
+    const contentOnly = applied.text.split("<!-- MD-FMT-HEADING-REVIEW:START -->")[0] ?? applied.text;
 
     expect(applied.hasReviewTable).toBe(true);
     expect(applied.appliedCount).toBeGreaterThan(0);
     expect(applied.text.includes("## 1.1 改后标题")).toBe(true);
+    expect(contentOnly.includes("↳ ## 1.1 改后标题")).toBe(false);
+  });
+
+  it("remains stable after heading review apply and reformat for top-level anchors", () => {
+    const input = ["# 30 总结", "## 30.1 核心公式", "# 31. 学习主线回顾", "# 32 容易混淆的点"].join("\n");
+    const built = buildHeadingReviewTable(input);
+    const applied = applyHeadingReviewTable(built.text);
+    const reformatted = formatMarkdown(applied.text);
+
+    expect(reformatted).toContain("# 31 学习主线回顾");
+    expect(reformatted).toContain("# 32 容易混淆的点");
+    expect(reformatted).not.toContain("### 31");
+  });
+
+  it("remains stable after heading review apply and reformat for chinese-alpha-arabic mixed headings", () => {
+    const input = ["#### 五、总论", "### 5.1 背景", "##### a. 现象", "#### 5.1.1 回到阿拉伯路径", "##### 无编号补充"].join("\n");
+    const built = buildHeadingReviewTable(input);
+    const applied = applyHeadingReviewTable(built.text);
+    const reformatted = formatMarkdown(applied.text);
+
+    expect(reformatted).toContain("# 5 总论");
+    expect(reformatted).toContain("### a. 现象");
+    expect(reformatted).toContain("### 5.1.1 回到阿拉伯路径");
+    expect(reformatted).toContain("#### 5.1.1.1 无编号补充");
+  });
+
+  it("remains stable after heading review apply and reformat for ordered alpha siblings", () => {
+    const input = ["## 5.1 小节", "### A. 第一步", "### C. 跳号第三步", "### D) 第四步"].join("\n");
+    const built = buildHeadingReviewTable(input);
+    const applied = applyHeadingReviewTable(built.text);
+    const reformatted = formatMarkdown(applied.text);
+
+    expect(reformatted).toContain("### A. 第一步");
+    expect(reformatted).toContain("### B. 跳号第三步");
+    expect(reformatted).toContain("### C) 第四步");
+  });
+
+  it("remains stable after heading review apply and reformat for nested lower-alpha sequence with plain child", () => {
+    const input = ["## 5.1 小节", "### a) 第一步", "#### 无编号说明", "### c. 第三步"].join("\n");
+    const built = buildHeadingReviewTable(input);
+    const applied = applyHeadingReviewTable(built.text);
+    const reformatted = formatMarkdown(applied.text);
+
+    expect(reformatted).toContain("### a) 第一步");
+    expect(reformatted).toContain("#### 无编号说明");
+    expect(reformatted).toContain("### b. 第三步");
+  });
+
+  it("remains stable after heading review apply and reformat for alpha composite paths", () => {
+    const input = ["# 总论", "### A.1 一级主题", "##### A.1.1 二级主题", "###### 无编号总结"].join("\n");
+    const built = buildHeadingReviewTable(input);
+    const applied = applyHeadingReviewTable(built.text);
+    const reformatted = formatMarkdown(applied.text);
+
+    expect(reformatted).toContain("## A.1 一级主题");
+    expect(reformatted).toContain("### A.1.1 二级主题");
+    expect(reformatted).toContain("#### A.1.1.1 无编号总结");
   });
 
   it("preserves escaped pipe-like latex content when applying heading review rows", () => {
@@ -890,5 +1213,48 @@ describe("formatMarkdown", () => {
     const second = formatMarkdownWithStats(first).text;
 
     expect(second).toBe(first);
+  });
+});
+
+describe("heading marker parser", () => {
+  const markerCases: HeadingMarkerCase[] = [
+    { label: "中文裸序号", text: "一 标题", kind: "chinese_numeric", strength: "structured", depth: 1, numericPath: [1], numericValue: 1, alphaValue: null },
+    { label: "中文顿号序号", text: "一、 标题", kind: "chinese_numeric", strength: "structured", depth: 1, numericPath: [1], numericValue: 1, alphaValue: null },
+    { label: "阿拉伯裸数字", text: "1 标题", kind: "arabic_single", strength: "structured", depth: 1, numericPath: [1], numericValue: 1, alphaValue: null },
+    { label: "阿拉伯点号单段", text: "1. 标题", kind: "arabic_single", strength: "structured", depth: 1, numericPath: [1], numericValue: 1, alphaValue: null },
+    { label: "阿拉伯路径", text: "1.1 标题", kind: "arabic_path", strength: "structured", depth: 2, numericPath: [1, 1], numericValue: 1, alphaValue: null },
+    { label: "阿拉伯路径尾点", text: "1.1. 标题", kind: "arabic_path", strength: "structured", depth: 2, numericPath: [1, 1], numericValue: 1, alphaValue: null },
+    { label: "阿拉伯三级路径", text: "1.1.1 标题", kind: "arabic_path", strength: "structured", depth: 3, numericPath: [1, 1, 1], numericValue: 1, alphaValue: null },
+    { label: "upper alpha 复合路径", text: "A.1 标题", kind: "alpha_compound_upper", strength: "structured", depth: 2, numericPath: [1, 1], numericValue: 1, alphaValue: "A" },
+    { label: "upper alpha 三级复合路径", text: "A.1.1 标题", kind: "alpha_compound_upper", strength: "structured", depth: 3, numericPath: [1, 1, 1], numericValue: 1, alphaValue: "A" },
+    { label: "lower alpha 复合路径", text: "a.2 标题", kind: "alpha_compound_lower", strength: "structured", depth: 2, numericPath: [1, 2], numericValue: 1, alphaValue: "a" },
+    { label: "小写裸字母", text: "a 标题", kind: "alpha_single_lower", strength: "weak_explicit", depth: 1, numericPath: null, numericValue: null, alphaValue: "a" },
+    { label: "小写点号字母", text: "a. 标题", kind: "alpha_single_lower", strength: "ordered_explicit", depth: 1, numericPath: null, numericValue: null, alphaValue: "a" },
+    { label: "小写右括号字母", text: "a) 标题", kind: "alpha_single_lower", strength: "ordered_explicit", depth: 1, numericPath: null, numericValue: null, alphaValue: "a" },
+    { label: "小写右括号加点字母", text: "a). 标题", kind: "alpha_single_lower", strength: "ordered_explicit", depth: 1, numericPath: null, numericValue: null, alphaValue: "a" },
+    { label: "大写裸字母", text: "A 标题", kind: "alpha_single_upper", strength: "weak_explicit", depth: 1, numericPath: null, numericValue: null, alphaValue: "A" },
+    { label: "大写点号字母", text: "A. 标题", kind: "alpha_single_upper", strength: "ordered_explicit", depth: 1, numericPath: null, numericValue: null, alphaValue: "A" },
+    { label: "大写右括号字母", text: "A) 标题", kind: "alpha_single_upper", strength: "ordered_explicit", depth: 1, numericPath: null, numericValue: null, alphaValue: "A" },
+    { label: "大写右括号加点字母", text: "A). 标题", kind: "alpha_single_upper", strength: "ordered_explicit", depth: 1, numericPath: null, numericValue: null, alphaValue: "A" }
+  ];
+
+  it.each(markerCases)("parses heading marker: $label", ({ text, kind, strength, depth, numericPath, numericValue, alphaValue }) => {
+    const marker = parseHeadingMarker(text);
+
+    expect(marker.kind).toBe(kind);
+    expect(getHeadingMarkerStrength(marker)).toBe(strength);
+    expect(marker.logicalDepth).toBe(depth);
+    expect(marker.numericPath).toEqual(numericPath);
+    expect(marker.numericValue).toBe(numericValue);
+    expect(marker.alphaValue).toBe(alphaValue);
+    expect(hasExplicitHeadingPrefix(text)).toBe(true);
+  });
+
+  it("keeps legacy parser outputs aligned with unified heading marker", () => {
+    expect(parseChineseHeadingPrefixNumber("一、 标题")).toBe(1);
+    expect(parseSingleNumericHeadingPrefix("1. 标题")).toBe(1);
+    expect(parseHeadingDepthByArabicNumber("1.1. 标题")).toBe(2);
+    expect(parseArabicHeadingPath("1.1.1 标题")).toEqual([1, 1, 1]);
+    expect(hasExplicitHeadingPrefix("A). 标题")).toBe(true);
   });
 });

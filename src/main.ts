@@ -2,8 +2,7 @@ import { MarkdownView, Notice, Platform, Plugin } from "obsidian";
 import {
   applyHeadingReviewTable,
   buildHeadingReviewTable,
-  formatMarkdownContentOnlyWithStats,
-  formatMarkdownWithStats
+  formatMarkdownContentOnlyWithStats
 } from "./formatter";
 
 type ImageSizingMetrics = {
@@ -35,17 +34,10 @@ export default class MdContentFormattingPlugin extends Plugin {
 
   async onload(): Promise<void> {
     this.addCommand({
-      id: "format-current-note",
-      name: "Format current note (headings + content)",
-      callback: () => {
-        this.formatCurrentNote();
-      }
-    });
-    this.addCommand({
       id: "format-current-note-content-only",
       name: "Format current note (content only)",
       callback: () => {
-        this.formatCurrentNoteContentOnly();
+        this.formatCurrentNote();
       }
     });
     this.addCommand({
@@ -99,11 +91,7 @@ export default class MdContentFormattingPlugin extends Plugin {
   }
 
   private formatCurrentNote(): void {
-    this.formatCurrentNoteInternal("full");
-  }
-
-  private formatCurrentNoteContentOnly(): void {
-    this.formatCurrentNoteInternal("content-only");
+    this.formatCurrentNoteInternal();
   }
 
   private generateHeadingReviewTable(): void {
@@ -115,7 +103,7 @@ export default class MdContentFormattingPlugin extends Plugin {
     const editor = markdownView.editor;
     const source = editor.getValue();
     const result = buildHeadingReviewTable(source);
-    editor.setValue(result.text);
+    this.replaceEditorTextPreservingView(markdownView, result.text);
     new Notice(
       result.replacedExisting
         ? `Heading review table refreshed (${result.itemCount} headings).`
@@ -136,11 +124,11 @@ export default class MdContentFormattingPlugin extends Plugin {
       new Notice("No heading review table found.");
       return;
     }
-    editor.setValue(result.text);
+    this.replaceEditorTextPreservingView(markdownView, result.text);
     new Notice(`Heading review applied (${result.appliedCount} updated, ${result.skippedCount} skipped).`);
   }
 
-  private formatCurrentNoteInternal(mode: "full" | "content-only"): void {
+  private formatCurrentNoteInternal(): void {
     const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (!markdownView) {
       new Notice("No active markdown file.");
@@ -149,7 +137,7 @@ export default class MdContentFormattingPlugin extends Plugin {
 
     const editor = markdownView.editor;
     const source = editor.getValue();
-    const formatWithStats = mode === "content-only" ? formatMarkdownContentOnlyWithStats : formatMarkdownWithStats;
+    const formatWithStats = formatMarkdownContentOnlyWithStats;
     const { text: formatted, stats } = formatWithStats(source);
     const secondPass = formatWithStats(formatted);
     const idempotenceChanged = secondPass.text !== formatted;
@@ -201,8 +189,17 @@ export default class MdContentFormattingPlugin extends Plugin {
       return;
     }
 
-    editor.setValue(formatted);
-    new Notice(mode === "content-only" ? "Markdown content formatted (headings unchanged)." : "Markdown formatted.");
+    this.replaceEditorTextPreservingView(markdownView, formatted);
+    new Notice("Markdown content formatted (headings unchanged).");
+  }
+
+  private replaceEditorTextPreservingView(markdownView: MarkdownView, nextText: string): void {
+    const editor = markdownView.editor;
+    const previousCursor = editor.getCursor();
+    const previousScroll = editor.getScrollInfo();
+    editor.setValue(nextText);
+    editor.setCursor(previousCursor);
+    editor.scrollTo(previousScroll.left, previousScroll.top);
   }
 
   private scheduleImageSizingForActiveView(trigger: string): void {
